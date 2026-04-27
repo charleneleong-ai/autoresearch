@@ -15,6 +15,7 @@ Self-driving experiment sweep loop — daemon-detached `autoresearch.py` + live 
 | `autoresearch.render` | Standalone matplotlib renderer for `progress.png` — no Plotly/kaleido/Chrome dep |
 | `autoresearch.pr_updater` | Periodic daemon: refreshes chart + regenerates `progress.html` + PATCHes the PR body between `<!-- SWEEP_NARRATIVE_START/END -->` markers (10-min poll cadence) |
 | `autoresearch.current_run` | Detached daemon: watches `logs/autoresearch_*.log` and writes `current_run.json` for the in-flight RUNNING dot |
+| `autoresearch.gpu_monitor` | `GPUMonitor` context manager — samples `nvidia-smi` while a workload runs, emits a summary with mean util, peak memory, and rightsizing hints. Drop-in for training, sweeps, and eval scripts. |
 
 ## Install
 
