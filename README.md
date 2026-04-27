@@ -19,7 +19,7 @@ uv add autoresearch                   # once published; until then:
 uv pip install git+https://github.com/charleneleong-ai/autoresearch.git
 ```
 
-## Usage (v0.1)
+## Usage (v0.0.1)
 
 ```python
 from autoresearch.results import load_results, log_experiment
@@ -50,7 +50,7 @@ autoresearch-render --tag my_sweep --config gemma   # per-config
 
 ## Status
 
-**v0.1 — Alpha, personal use.** The data layer (`results.py`) and chart widget (`charts.py`) are stable and ported verbatim from the live implementations. The renderer is functional. The `pr_updater` and `current_run` daemons are CLI-stubs — see issues for TODOs.
+**v0.0.1 — Alpha, personal use.** The data layer (`results.py`) and chart widget (`charts.py`) are stable and ported verbatim from the live implementations. The renderer is functional. The `pr_updater` and `current_run` daemons are CLI-stubs — see issues for TODOs.
 
 ## License
 

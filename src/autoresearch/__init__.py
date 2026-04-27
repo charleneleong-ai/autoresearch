@@ -1,7 +1,7 @@
 """autoresearch — self-driving experiment sweep loop with live PR-updating chart."""
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.0.1"
 
 from autoresearch.results import (
     load_results,

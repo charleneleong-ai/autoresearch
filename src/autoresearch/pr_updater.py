@@ -8,7 +8,7 @@ Polls every POLL_S seconds and:
    `<!-- SWEEP_NARRATIVE_START -->` … `<!-- SWEEP_NARRATIVE_END -->` markers
    with a sweep-summary table built from `results.jsonl`.
 
-TODO (v0.1 stub — see issue): port the full daemon from
+TODO (v0.0.1 stub — see issue): port the full daemon from
 `charleneleong-ai/dotfiles` autoresearch-loop skill template
 (`templates/_pr_updater.py`). Until then, copy that template into your
 project directly.
@@ -30,7 +30,7 @@ def main() -> None:
     p.parse_args()
 
     print(
-        "autoresearch-pr-updater is a v0.1 stub.\n"
+        "autoresearch-pr-updater is a v0.0.1 stub.\n"
         "Until ported, copy templates/_pr_updater.py from\n"
         "  https://github.com/charleneleong-ai/dotfiles/tree/master/"
         "claude/plugins/research/skills/autoresearch-loop/templates\n"

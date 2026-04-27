@@ -5,7 +5,7 @@ Watches the latest `logs/autoresearch_*.log` and keeps
 iteration is currently in flight, so plot_progress can render an extra
 RUNNING marker between commits without waiting for the iter to finish.
 
-TODO (v0.1 stub — see issue): port from
+TODO (v0.0.1 stub — see issue): port from
 `charleneleong-ai/dotfiles` autoresearch-loop skill template
 (`templates/current_run_updater.py`). Until then, copy that template into
 your project directly.
@@ -25,7 +25,7 @@ def main() -> None:
     p.parse_args()
 
     print(
-        "autoresearch-current-run is a v0.1 stub.\n"
+        "autoresearch-current-run is a v0.0.1 stub.\n"
         "Until ported, copy templates/current_run_updater.py from\n"
         "  https://github.com/charleneleong-ai/dotfiles/tree/master/"
         "claude/plugins/research/skills/autoresearch-loop/templates\n"
