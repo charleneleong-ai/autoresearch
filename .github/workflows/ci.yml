@@ -1,9 +1,11 @@
 name: CI
 
 # Lint + test on every PR + push to main. Releases are handled separately
-# by release.yml — which auto-bumps + tags + ships on push to main when
-# conventional commits since the last tag warrant a release (semver-driven
-# by commitizen).
+# by release.yml — semver-driven by commitizen.
+#
+# Lint failures here mean a contributor skipped pre-commit; recover by
+# running `mise run lint` (or `ruff check src/ tests/ --fix`) locally.
+# CI does NOT auto-push fixes back to the PR branch — too noisy.
 on:
   pull_request:
   push:
