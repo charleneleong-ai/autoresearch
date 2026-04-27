@@ -58,6 +58,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
+# typer's API requires `typer.Option(...)` calls in argument defaults — that's
+# how it discovers CLI flags. Disable B008 globally; it's a known false positive
+# for typer / fastapi / similar dependency-injection-style APIs.
+ignore = ["B008"]
 
 # ── Commitizen — conventional-commit-driven releases ──────────────────
 # Bump versions + update CHANGELOG.md + tag with one command:

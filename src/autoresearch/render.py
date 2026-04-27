@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import matplotlib.pyplot as plt
 import typer
@@ -78,7 +78,8 @@ def _draw_axis(
         ax.set_axis_off()
         return
 
-    score = lambda r: r.get(score_field, r.get("score", r.get("evaluation_score", 0)))
+    def score(r):
+        return r.get(score_field, r.get("score", r.get("evaluation_score", 0)))
     best_exp = max(rows, key=score).get("experiment", 0)
 
     for r in rows:
@@ -232,11 +233,11 @@ def render(
 
 def main(
     experiments_dir: Path = typer.Option(Path("experiments"), "--experiments-dir"),
-    tag: Optional[str] = typer.Option(None, "--tag"),
-    config_name: Optional[str] = typer.Option(
+    tag: str | None = typer.Option(None, "--tag"),
+    config_name: str | None = typer.Option(
         None, "--config", help="Per-config sub-dir for multi-sweep isolation"
     ),
-    out: Optional[Path] = typer.Option(
+    out: Path | None = typer.Option(
         None, "--out", help="Output PNG path. Defaults to <tag-dir>/progress.png"
     ),
     title: str = typer.Option("Autoresearch progress", "--title"),

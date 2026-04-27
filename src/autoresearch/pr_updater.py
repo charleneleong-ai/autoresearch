@@ -40,9 +40,9 @@ import json
 import re
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import typer
 from rich import print as rprint
@@ -55,7 +55,7 @@ MARKER_END = "<!-- SWEEP_NARRATIVE_END -->"
 
 
 def _ts() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
 
 
 def _kill_short(kill_reason: str) -> str:
@@ -85,7 +85,8 @@ def _build_narrative(rows: list[dict[str, Any]], score_field: str = "score") -> 
     """Build the markdown table that lives between the marker comments."""
     if not rows:
         return "_(no results yet)_"
-    score = lambda r: r.get(score_field, r.get("score", r.get("evaluation_score", 0.0)))
+    def score(r):
+        return r.get(score_field, r.get("score", r.get("evaluation_score", 0.0)))
     n_kept = sum(1 for r in rows if r["status"] in ("KEEP", "BASELINE"))
     n_killed = sum(1 for r in rows if r["status"] == "EARLY_KILL")
     n_crash = sum(1 for r in rows if r["status"] == "CRASH")
@@ -192,7 +193,7 @@ def _patch_pr_body(repo: str, pr: int, narrative: str, cwd: Path) -> bool:
 
 def main(
     tag: str = typer.Option(..., "--tag", help="Top-level task/sweep tag (e.g. 'dd_explainer')"),
-    config_name: Optional[str] = typer.Option(
+    config_name: str | None = typer.Option(
         None, "--config", help="Per-config sub-dir for multi-sweep isolation"
     ),
     pr: int = typer.Option(..., "--pr", help="PR number to PATCH"),
@@ -208,7 +209,7 @@ def main(
         help="Seconds between ticks (default 600 = 10 min)",
     ),
     score_field: str = typer.Option("score", "--score-field", help="JSONL field to use as the headline score"),
-    png_path: Optional[Path] = typer.Option(
+    png_path: Path | None = typer.Option(
         None, "--png-path", help="Override PNG output path (default: <tag-dir>/progress.png)"
     ),
     cwd: Path = typer.Option(Path("."), "--cwd", help="Working dir for git/gh subprocess calls (project root)"),

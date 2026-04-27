@@ -1,5 +1,9 @@
 # autoresearch
 
+[![CI](https://github.com/charleneleong-ai/autoresearch/actions/workflows/ci.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/ci.yml)
+[![Release](https://github.com/charleneleong-ai/autoresearch/actions/workflows/release.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/release.yml)
+[![PyPI version](https://img.shields.io/badge/version-v0.0.2-blue)](https://github.com/charleneleong-ai/autoresearch/releases/latest)
+
 Self-driving experiment sweep loop — daemon-detached `autoresearch.py` + live PR-updating progress chart. Extracted from a coding-agent research-loop skill and stabilised across multiple ML training projects.
 
 ## What it does
