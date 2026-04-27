@@ -42,13 +42,14 @@ from typing import Any
 # against an A100-class run). Override per workload if your hardware envelope
 # is different.
 DEFAULT_POLL_INTERVAL_S = 10
-DEFAULT_LOW_UTIL_PCT = 35    # mean util below this → compute-underused
-DEFAULT_LOW_MEM_PCT = 35     # peak mem % below this → undersized config
+DEFAULT_LOW_UTIL_PCT = 35  # mean util below this → compute-underused
+DEFAULT_LOW_MEM_PCT = 35  # peak mem % below this → undersized config
 
 
 @dataclass
 class GPUSample:
     """One nvidia-smi snapshot."""
+
     util_pct: int
     mem_used_gb: float
     mem_total_gb: float
@@ -57,6 +58,7 @@ class GPUSample:
 @dataclass
 class GPUSummary:
     """Aggregated stats over a monitored interval."""
+
     n_samples: int
     runtime_s: float
     mean_util_pct: float
