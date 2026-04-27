@@ -214,12 +214,10 @@ def main(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Working dir for git/gh subprocess calls (project root)"),
 ) -> None:
     cwd = cwd.resolve()
-    if png_path:
-        png_path = png_path.resolve()
-    else:
-        png_path = (cwd / experiments_dir / tag).resolve() / (
-            f"{config_name}/progress.png" if config_name else "progress.png"
-        )
+    if png_path is None:
+        # tag_dir handles the optional config_name + creates parent dirs.
+        png_path = cwd / tag_dir(experiments_dir, tag, config_name) / "progress.png"
+    png_path = png_path.resolve()
     png_path.parent.mkdir(parents=True, exist_ok=True)
 
     print(
