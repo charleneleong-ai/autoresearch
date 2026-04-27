@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
+from rich import print as rprint
 
 from autoresearch.render import render
 from autoresearch.results import load_results, tag_dir
@@ -152,7 +153,7 @@ def _git_push_png_if_changed(png_path: Path, branch: str, cwd: Path) -> bool:
         capture_output=True, text=True,
     )
     if push.returncode != 0:
-        print(f"[pr_updater] push failed: {push.stderr.strip()[:200]}", flush=True)
+        rprint(f"[red]\\[pr_updater][/red] push failed: {push.stderr.strip()[:200]}")
     return push.returncode == 0
 
 
@@ -163,15 +164,14 @@ def _patch_pr_body(repo: str, pr: int, narrative: str, cwd: Path) -> bool:
         capture_output=True, text=True, cwd=str(cwd),
     )
     if body_proc.returncode != 0:
-        print(f"[pr_updater] gh api failed: {body_proc.stderr.strip()[:200]}", flush=True)
+        rprint(f"[red]\\[pr_updater][/red] gh api failed: {body_proc.stderr.strip()[:200]}")
         return False
     body = body_proc.stdout
     if MARKER_START not in body or MARKER_END not in body:
-        print(
-            f"[pr_updater] markers missing in PR #{pr} body — add "
-            f"<!-- SWEEP_NARRATIVE_START --> and <!-- SWEEP_NARRATIVE_END --> "
-            "to the body before launching",
-            flush=True,
+        rprint(
+            f"[yellow]\\[pr_updater][/yellow] markers missing in PR #{pr} body — add "
+            "<!-- SWEEP_NARRATIVE_START --> and <!-- SWEEP_NARRATIVE_END --> "
+            "to the body before launching"
         )
         return False
     pre, _, rest = body.partition(MARKER_START)
@@ -185,7 +185,7 @@ def _patch_pr_body(repo: str, pr: int, narrative: str, cwd: Path) -> bool:
         input=payload, text=True, capture_output=True, cwd=str(cwd),
     )
     if proc.returncode != 0:
-        print(f"[pr_updater] PATCH failed: {proc.stderr.strip()[:200]}", flush=True)
+        rprint(f"[red]\\[pr_updater][/red] PATCH failed: {proc.stderr.strip()[:200]}")
         return False
     return True
 
@@ -220,11 +220,11 @@ def main(
     png_path = png_path.resolve()
     png_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(
-        f"[pr_updater] starting — poll every {poll_s}s, PR #{pr} on {repo}\n"
+    rprint(
+        f"[bold cyan]\\[pr_updater][/bold cyan] starting — poll every {poll_s}s, "
+        f"PR #{pr} on [bold]{repo}[/bold]\n"
         f"  experiments_dir={experiments_dir}  tag={tag}  config={config_name}\n"
-        f"  png_path={png_path}",
-        flush=True,
+        f"  png_path={png_path}"
     )
 
     while True:
@@ -234,13 +234,15 @@ def main(
             rows = load_results(experiments_dir, tag, config_name)
             narrative = _build_narrative(rows, score_field=score_field)
             patched = _patch_pr_body(repo, pr, narrative, cwd)
-            print(
-                f"[pr_updater] {_ts()} — png_changed={png_changed} pushed={pushed} "
-                f"pr_patched={patched} rows={len(rows)}",
-                flush=True,
+            png_tag = "[green]✓[/green]" if png_changed else "·"
+            push_tag = "[green]✓[/green]" if pushed else "·"
+            patch_tag = "[green]✓[/green]" if patched else "·"
+            rprint(
+                f"\\[pr_updater] {_ts()} — png {png_tag} push {push_tag} "
+                f"pr {patch_tag} rows={len(rows)}"
             )
         except Exception as e:
-            print(f"[pr_updater] tick error: {e}", flush=True)
+            rprint(f"[red]\\[pr_updater][/red] tick error: {e}")
         time.sleep(poll_s)
 
 
