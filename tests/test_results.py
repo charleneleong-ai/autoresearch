@@ -1,4 +1,5 @@
 """Smoke tests for autoresearch.results — flat + per-config layouts."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -48,7 +49,11 @@ def test_log_then_load_round_trip(tmp_path: Path) -> None:
 def test_log_per_game_experiment_numbering(tmp_path: Path) -> None:
     for i in range(3):
         log_experiment(
-            experiments_dir=tmp_path, tag="t", game="A", score=i, status="KEEP",
+            experiments_dir=tmp_path,
+            tag="t",
+            game="A",
+            score=i,
+            status="KEEP",
         )
     log_experiment(experiments_dir=tmp_path, tag="t", game="B", score=99, status="KEEP")
     rows = load_results(tmp_path, "t")
@@ -60,12 +65,20 @@ def test_log_per_game_experiment_numbering(tmp_path: Path) -> None:
 
 def test_per_config_isolation(tmp_path: Path) -> None:
     log_experiment(
-        experiments_dir=tmp_path, tag="t", config_name="gemma",
-        game="A", score=1, status="KEEP",
+        experiments_dir=tmp_path,
+        tag="t",
+        config_name="gemma",
+        game="A",
+        score=1,
+        status="KEEP",
     )
     log_experiment(
-        experiments_dir=tmp_path, tag="t", config_name="qwen",
-        game="A", score=99, status="KEEP",
+        experiments_dir=tmp_path,
+        tag="t",
+        config_name="qwen",
+        game="A",
+        score=99,
+        status="KEEP",
     )
     gemma = load_results(tmp_path, "t", "gemma")
     qwen = load_results(tmp_path, "t", "qwen")

@@ -34,6 +34,7 @@ Usage:
 
 All git operations run in the project's working tree (`--cwd`, default `.`).
 """
+
 from __future__ import annotations
 
 import json
@@ -85,8 +86,10 @@ def _build_narrative(rows: list[dict[str, Any]], score_field: str = "score") -> 
     """Build the markdown table that lives between the marker comments."""
     if not rows:
         return "_(no results yet)_"
+
     def score(r):
         return r.get(score_field, r.get("score", r.get("evaluation_score", 0.0)))
+
     n_kept = sum(1 for r in rows if r["status"] in ("KEEP", "BASELINE"))
     n_killed = sum(1 for r in rows if r["status"] == "EARLY_KILL")
     n_crash = sum(1 for r in rows if r["status"] == "CRASH")
@@ -126,8 +129,9 @@ def _build_narrative(rows: list[dict[str, Any]], score_field: str = "score") -> 
     return "\n".join(lines)
 
 
-def _refresh_png(experiments_dir: Path, tag: str, config_name: str | None,
-                 png_path: Path, score_field: str) -> bool:
+def _refresh_png(
+    experiments_dir: Path, tag: str, config_name: str | None, png_path: Path, score_field: str
+) -> bool:
     """Regenerate the PNG via `autoresearch.render`. Returns True if rewritten."""
     before_mtime = png_path.stat().st_mtime if png_path.exists() else -1
     try:
@@ -151,11 +155,14 @@ def _git_push_png_if_changed(png_path: Path, branch: str, cwd: Path) -> bool:
         return False
     subprocess.run(
         ["git", "commit", "-m", f"docs: refresh autoresearch screenshot ({_ts()})"],
-        cwd=str(cwd), check=True,
+        cwd=str(cwd),
+        check=True,
     )
     push = subprocess.run(
-        ["git", "push", "origin", branch], cwd=str(cwd),
-        capture_output=True, text=True,
+        ["git", "push", "origin", branch],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
     )
     if push.returncode != 0:
         rprint(f"[red]\\[pr_updater][/red] push failed: {push.stderr.strip()[:200]}")
@@ -166,7 +173,9 @@ def _patch_pr_body(repo: str, pr: int, narrative: str, cwd: Path) -> bool:
     """Fetch PR body via `gh api`, splice narrative between markers, PATCH back."""
     body_proc = subprocess.run(
         ["gh", "api", f"repos/{repo}/pulls/{pr}", "--jq", ".body"],
-        capture_output=True, text=True, cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
     )
     if body_proc.returncode != 0:
         rprint(f"[red]\\[pr_updater][/red] gh api failed: {body_proc.stderr.strip()[:200]}")
@@ -187,7 +196,10 @@ def _patch_pr_body(repo: str, pr: int, narrative: str, cwd: Path) -> bool:
     payload = json.dumps({"body": new})
     proc = subprocess.run(
         ["gh", "api", f"repos/{repo}/pulls/{pr}", "--method", "PATCH", "--input", "-"],
-        input=payload, text=True, capture_output=True, cwd=str(cwd),
+        input=payload,
+        text=True,
+        capture_output=True,
+        cwd=str(cwd),
     )
     if proc.returncode != 0:
         rprint(f"[red]\\[pr_updater][/red] PATCH failed: {proc.stderr.strip()[:200]}")
@@ -204,24 +216,29 @@ def main(
     repo: str = typer.Option(..., "--repo", help='owner/name (e.g. "you/repo")'),
     branch: str = typer.Option(..., "--branch", help="Branch to push the PNG commit to"),
     experiments_dir: Path = typer.Option(
-        Path("experiments"), "--experiments-dir",
+        Path("experiments"),
+        "--experiments-dir",
         help="Root dir holding tag/<config>/results.jsonl + progress.png",
     ),
     poll_s: int = typer.Option(
-        600, "--poll-s",
+        600,
+        "--poll-s",
         envvar="AUTORESEARCH_PR_UPDATER_POLL_S",
         help="Seconds between ticks (default 600 = 10 min)",
     ),
     score_field: str = typer.Option(
-        "score", "--score-field",
+        "score",
+        "--score-field",
         help="JSONL field to use as the headline score",
     ),
     png_path: Path | None = typer.Option(
-        None, "--png-path",
+        None,
+        "--png-path",
         help="Override PNG output path (default: <tag-dir>/progress.png)",
     ),
     cwd: Path = typer.Option(
-        Path("."), "--cwd",
+        Path("."),
+        "--cwd",
         help="Working dir for git/gh subprocess calls (project root)",
     ),
 ) -> None:

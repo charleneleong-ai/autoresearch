@@ -8,6 +8,7 @@ Standalone Plotly HTML files can't use Dash widgets (`dash_daq.BooleanSwitch`,
 native `updatemenus` only renders rectangular buttons and dropdowns — no
 toggle/switch primitive. So we generate small inline widgets here.
 """
+
 from __future__ import annotations
 
 import json
@@ -75,10 +76,13 @@ def plotly_label_toggle(
     indices_json = json.dumps(list(label_indices))
     n_traces_json = json.dumps(n_traces)
     checked = "checked" if default_on else ""
-    css = _SWITCH_CSS + f"""
+    css = (
+        _SWITCH_CSS
+        + f"""
         .cw-switch input:checked + .slider {{ background: {on_color}; }}
         .cw-switch input:not(:checked) + .slider {{ background: {off_color}; }}
     """
+    )
     return f"""
     (function () {{
         const gd = document.getElementById('{{plot_id}}');

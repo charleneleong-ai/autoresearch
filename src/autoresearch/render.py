@@ -13,6 +13,7 @@ Single-game and multi-game (per-row `game` field) layouts both supported:
 Adapt `_STATUS_STYLE` / `_kill_tag` if your project uses a different palette
 or triage vocabulary.
 """
+
 from __future__ import annotations
 
 import re
@@ -26,12 +27,12 @@ from rich import print as rprint
 from autoresearch.results import load_results, tag_dir
 
 _STATUS_STYLE = {
-    "DISCARD":    {"color": "#cccccc", "line_color": "#999",    "text_color": "#777"},
-    "KEEP":       {"color": "#2ecc71", "line_color": "black",   "text_color": "#1a7a3a"},
-    "BASELINE":   {"color": "#2ecc71", "line_color": "black",   "text_color": "#1a7a3a"},
-    "RUNNING":    {"color": "#f1c40f", "line_color": "#9a7d0a", "text_color": "#7d6608"},
+    "DISCARD": {"color": "#cccccc", "line_color": "#999", "text_color": "#777"},
+    "KEEP": {"color": "#2ecc71", "line_color": "black", "text_color": "#1a7a3a"},
+    "BASELINE": {"color": "#2ecc71", "line_color": "black", "text_color": "#1a7a3a"},
+    "RUNNING": {"color": "#f1c40f", "line_color": "#9a7d0a", "text_color": "#7d6608"},
     "EARLY_KILL": {"color": "#7f8c8d", "line_color": "#34495e", "text_color": "#34495e"},
-    "CRASH":      {"color": "#e74c3c", "line_color": "#922b21", "text_color": "#922b21"},
+    "CRASH": {"color": "#e74c3c", "line_color": "#922b21", "text_color": "#922b21"},
 }
 
 
@@ -80,13 +81,15 @@ def _draw_axis(
 
     def score(r):
         return r.get(score_field, r.get("score", r.get("evaluation_score", 0)))
+
     best_exp = max(rows, key=score).get("experiment", 0)
 
     for r in rows:
         cfg = _STATUS_STYLE.get(r.get("status", "DISCARD"), _STATUS_STYLE["DISCARD"])
         is_best = r.get("experiment") == best_exp
         ax.scatter(
-            r.get("experiment", 0), score(r),
+            r.get("experiment", 0),
+            score(r),
             s=400 if is_best else 220,
             c=cfg["color"],
             edgecolors="#27ae60" if is_best else cfg["line_color"],
@@ -126,9 +129,12 @@ def _draw_axis(
 
         y_off = 1.6 if j % 2 == 0 else -1.8
         ax.annotate(
-            text, xy=(r.get("experiment", 0), score(r)),
-            xytext=(0, y_off * 18), textcoords="offset points",
-            ha="center", va="center",
+            text,
+            xy=(r.get("experiment", 0), score(r)),
+            xytext=(0, y_off * 18),
+            textcoords="offset points",
+            ha="center",
+            va="center",
             fontsize=9 if not is_best else 10,
             fontweight="bold" if is_best else "normal",
             color=("#1a7a3a" if is_best else cfg["text_color"]),
@@ -148,7 +154,8 @@ def _draw_axis(
     ax.set_title(
         f"{title} — {n} exp · {n_kept} kept · {n_killed} killed · "
         f"{n_crash} crashed · {runtime_total:.0f}min",
-        fontsize=12, color="#222",
+        fontsize=12,
+        color="#222",
     )
     ax.set_xlabel("Experiment #", fontsize=10)
     ax.set_ylabel(score_label, fontsize=10)
@@ -218,7 +225,8 @@ def render(
         fig.patch.set_facecolor("white")
         rows = sorted(rows, key=lambda r: r.get("experiment", 0))
         _draw_axis(
-            ax, rows,
+            ax,
+            rows,
             score_field=score_field,
             score_label=score_label,
             title=full_title,
@@ -242,7 +250,8 @@ def main(
     ),
     title: str = typer.Option("Autoresearch progress", "--title"),
     score_field: str = typer.Option(
-        "score", "--score-field",
+        "score",
+        "--score-field",
         help="JSONL field to plot on y-axis (e.g. 'score' or 'evaluation_score')",
     ),
     score_label: str = typer.Option("Reward (higher is better)", "--score-label"),

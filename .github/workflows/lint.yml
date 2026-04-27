@@ -1,0 +1,24 @@
+name: Lint
+
+# Runs all hooks defined in .pre-commit-config.yaml — same checks as
+# `mise run init` registers locally. Single source of truth: edit hooks
+# in .pre-commit-config.yaml and they auto-land in CI without touching
+# this workflow.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pre-commit:
+    name: pre-commit (ruff + format + hygiene)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Caches the hook envs by config-hash so repeat runs are fast.
+      - uses: pre-commit/action@v3.0.1

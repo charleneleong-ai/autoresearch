@@ -9,6 +9,7 @@ The `config_name` parameter enables per-config sub-results so multiple
 parallel sweeps (e.g. gemma vs qwen) can write side-by-side without
 trampling each other's JSONL.
 """
+
 from __future__ import annotations
 
 import json
@@ -49,11 +50,7 @@ def load_results(
     results_file = tag_dir(experiments_dir, tag, config_name) / "results.jsonl"
     if not results_file.exists():
         return []
-    return [
-        json.loads(line)
-        for line in results_file.read_text().splitlines()
-        if line.strip()
-    ]
+    return [json.loads(line) for line in results_file.read_text().splitlines() if line.strip()]
 
 
 def log_experiment(
