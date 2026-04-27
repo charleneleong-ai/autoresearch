@@ -29,6 +29,7 @@ buffered.
 Usage:
     autoresearch-current-run --tag <task> [--config <name>] [--logs-dir logs]
 """
+
 from __future__ import annotations
 
 import json
@@ -41,9 +42,7 @@ from rich import print as rprint
 
 from autoresearch.results import tag_dir
 
-ITER_START_RE = re.compile(
-    r"\[(?P<ts>[\d\-T:Z]+)\] Iter (?P<n>\d+)/(?P<m>\d+): (?P<rest>.*)"
-)
+ITER_START_RE = re.compile(r"\[(?P<ts>[\d\-T:Z]+)\] Iter (?P<n>\d+)/(?P<m>\d+): (?P<rest>.*)")
 ITER_END_RE = re.compile(r"\[[\d\-T:Z]+\] Iter (?P<n>\d+)/(?P<m>\d+) finished")
 DESC_RE = re.compile(r"-d (\[autoresearch [^\]]+\][^-]+?)(?= --|$)")
 WANDB_RE = re.compile(r"https://wandb\.ai/[\w\-./]+/runs/[\w\-]+")
@@ -62,8 +61,7 @@ def _experiment_count(results_path: Path) -> int:
     return sum(1 for line in results_path.read_text().splitlines() if line.strip())
 
 
-def _tick(logs_dir: Path, sidecar: Path, results_path: Path,
-          config_name: str | None) -> None:
+def _tick(logs_dir: Path, sidecar: Path, results_path: Path, config_name: str | None) -> None:
     log = _latest_log(logs_dir)
     if log is None:
         return
@@ -83,20 +81,19 @@ def _tick(logs_dir: Path, sidecar: Path, results_path: Path,
         if sidecar.exists():
             sidecar.unlink()
             rprint(
-                f"\\[current_run] iter {iter_n}/{iter_m} "
-                f"[green]finished[/green] — sidecar removed"
+                f"\\[current_run] iter {iter_n}/{iter_m} [green]finished[/green] — sidecar removed"
             )
         return
 
     # Pull description from the `$ ... -d <desc> --max-steps ...` line that
     # follows the Iter line.
-    after_iter = text[last.end():]
+    after_iter = text[last.end() :]
     cmd_line = next((ln for ln in after_iter.splitlines() if ln.startswith("$ ")), "")
     m_desc = DESC_RE.search(cmd_line)
     desc = m_desc.group(1).strip() if m_desc else last.group("rest").strip()
 
     # Wandb URL inside this iter's chunk
-    chunk = text[last.start():]
+    chunk = text[last.start() :]
     urls = WANDB_RE.findall(chunk)
     wandb_url = urls[-1] if urls else ""
 
@@ -139,7 +136,8 @@ def main(
     experiments_dir: Path = typer.Option(Path("experiments"), "--experiments-dir"),
     logs_dir: Path = typer.Option(Path("logs"), "--logs-dir"),
     poll_s: int = typer.Option(
-        15, "--poll-s",
+        15,
+        "--poll-s",
         envvar="AUTORESEARCH_CURRENT_RUN_POLL_S",
         help="Seconds between ticks (default 15)",
     ),

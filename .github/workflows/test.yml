@@ -1,0 +1,30 @@
+name: Test
+
+# Runs pytest against the package (editable install) on every PR + main
+# push. Releases (release.yml) re-run the same tests against the BUILT
+# wheel after `cz bump`, so this catches regressions earlier in the
+# develop loop.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install package + dev deps
+        run: uv pip install --system -e '.[dev,pr]'
+
+      - name: Test with pytest
+        run: pytest tests/ -q
