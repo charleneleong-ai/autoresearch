@@ -1,3 +1,9 @@
+## v0.1.0 (2026-04-27)
+
+### Feat
+
+- **gpu_monitor**: GPUMonitor context manager for util + memory tracking
+
 ## v0.0.3 (2026-04-27)
 
 ### Fix
