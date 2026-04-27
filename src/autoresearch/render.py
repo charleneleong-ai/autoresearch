@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import typer
+from rich import print as rprint
 
 from autoresearch.results import load_results, tag_dir
 
@@ -254,7 +255,7 @@ def main(
         score_field=score_field,
         score_label=score_label,
     )
-    print(f"wrote {out_path}  ({out_path.stat().st_size // 1024} KB)")
+    rprint(f"[green]wrote[/green] {out_path}  ([dim]{out_path.stat().st_size // 1024} KB[/dim])")
 
 
 def cli() -> None:
