@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from rich import print as rprint
 
 from autoresearch.results import tag_dir
 
@@ -82,8 +83,10 @@ def _tick(logs_dir: Path, sidecar: Path, results_path: Path,
         # Latest started iter has finished — drop the sidecar.
         if sidecar.exists():
             sidecar.unlink()
-            print(f"[current_run] iter {iter_n}/{iter_m} finished — sidecar removed",
-                  flush=True)
+            rprint(
+                f"\\[current_run] iter {iter_n}/{iter_m} "
+                f"[green]finished[/green] — sidecar removed"
+            )
         return
 
     # Pull description from the `$ ... -d <desc> --max-steps ...` line that
@@ -122,10 +125,10 @@ def _tick(logs_dir: Path, sidecar: Path, results_path: Path,
         except json.JSONDecodeError:
             pass
     sidecar.write_text(json.dumps(payload, indent=2))
-    print(
-        f"[current_run] sidecar → iter {iter_n}/{iter_m} "
-        f"(E{payload['experiment']}, wandb={wandb_url or 'pending'})",
-        flush=True,
+    wandb_label = wandb_url if wandb_url else "[dim]pending[/dim]"
+    rprint(
+        f"\\[current_run] sidecar → iter [bold]{iter_n}/{iter_m}[/bold] "
+        f"(E{payload['experiment']}, wandb={wandb_label})"
     )
 
 
@@ -147,16 +150,15 @@ def main(
     sidecar = target_dir / "current_run.json"
     results_path = target_dir / "results.jsonl"
 
-    print(
-        f"[current_run] starting — poll every {poll_s}s\n"
-        f"  logs_dir={logs_dir}  sidecar={sidecar}",
-        flush=True,
+    rprint(
+        f"[bold cyan]\\[current_run][/bold cyan] starting — poll every {poll_s}s\n"
+        f"  logs_dir={logs_dir}  sidecar={sidecar}"
     )
     while True:
         try:
             _tick(logs_dir, sidecar, results_path, config_name)
         except Exception as e:
-            print(f"[current_run] tick error: {e}", flush=True)
+            rprint(f"[red]\\[current_run][/red] tick error: {e}")
         time.sleep(poll_s)
 
 
