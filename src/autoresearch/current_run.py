@@ -35,7 +35,6 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich import print as rprint
@@ -50,7 +49,7 @@ DESC_RE = re.compile(r"-d (\[autoresearch [^\]]+\][^-]+?)(?= --|$)")
 WANDB_RE = re.compile(r"https://wandb\.ai/[\w\-./]+/runs/[\w\-]+")
 
 
-def _latest_log(logs_dir: Path) -> Optional[Path]:
+def _latest_log(logs_dir: Path) -> Path | None:
     # Match training stdout logs only (timestamped name); skip the sidecar
     # `autoresearch_events.log` which has no step_time / `$ ...` lines.
     logs = sorted(logs_dir.glob("autoresearch_*T*Z.log"))
@@ -64,7 +63,7 @@ def _experiment_count(results_path: Path) -> int:
 
 
 def _tick(logs_dir: Path, sidecar: Path, results_path: Path,
-          config_name: Optional[str]) -> None:
+          config_name: str | None) -> None:
     log = _latest_log(logs_dir)
     if log is None:
         return
@@ -134,7 +133,7 @@ def _tick(logs_dir: Path, sidecar: Path, results_path: Path,
 
 def main(
     tag: str = typer.Option(..., "--tag", help="Top-level task/sweep tag (e.g. 'dd_explainer')"),
-    config_name: Optional[str] = typer.Option(
+    config_name: str | None = typer.Option(
         None, "--config", help="Per-config sub-dir for multi-sweep isolation"
     ),
     experiments_dir: Path = typer.Option(Path("experiments"), "--experiments-dir"),
