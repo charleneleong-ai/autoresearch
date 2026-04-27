@@ -22,8 +22,8 @@ data changed, the table is regenerated to reflect the latest timestamps.
 Design notes:
 - Uses `subprocess` for `git` / `gh` rather than a Python git lib so the
   daemon stays dependency-light (only `requests` optional for direct API).
-- Designed to run detached (`setsid + nohup + disown`) so it survives SSH
-  / Claude Code session death — verify `PPID=1` after launch.
+- Designed to run detached (`setsid + nohup + disown`) so it survives
+  SSH / coding-agent session death — verify `PPID=1` after launch.
 - Use `python -u` (or `flush=True` on prints) so the live log isn't
   silently buffered under nohup.
 
