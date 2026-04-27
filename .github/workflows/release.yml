@@ -1,0 +1,97 @@
+name: Release
+
+# Auto-release-on-merge — semver-driven by conventional commits.
+#
+# Runs on every push to main. Commitizen reads the commit log since the
+# previous tag and decides:
+#   feat:           → MINOR bump
+#   fix:            → PATCH bump
+#   BREAKING CHANGE → MAJOR bump (or MINOR while major_version_zero=true)
+#   chore:/docs:/etc → no bump (workflow exits as a no-op)
+#
+# Loop prevention: skips when the head commit is itself a `bump:` commit
+# (the one this workflow just created). Without this, every release would
+# re-trigger the workflow.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # bump commit + tag push + Release create
+
+jobs:
+  release:
+    name: Auto-bump + build + GitHub Release
+    runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.event.head_commit.message, 'bump:') }}
+    steps:
+      - name: Check out main with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # cz needs full log to walk back to last tag
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install package + commitizen + build
+        run: uv pip install --system -e '.[dev]' build
+
+      - name: Configure git for the bump commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Decide whether to bump
+        id: check
+        run: |
+          set +e
+          PREVIEW=$(cz bump --dry-run 2>&1)
+          echo "$PREVIEW"
+          if echo "$PREVIEW" | grep -qE "(No commits found|NoCommitsFound)"; then
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No release-worthy commits since last tag — skipping."
+          else
+            VERSION=$(echo "$PREVIEW" | grep -oE 'tag to create: v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/tag to create: v//')
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "::notice::Releasing v$VERSION"
+          fi
+
+      - name: Bump version + CHANGELOG + tag
+        if: steps.check.outputs.bump == 'true'
+        run: |
+          cz bump --yes
+          git push origin HEAD
+          git push origin --tags
+
+      - name: Build wheel + sdist (post-bump)
+        if: steps.check.outputs.bump == 'true'
+        run: python -m build
+
+      - name: Run tests against the built wheel
+        if: steps.check.outputs.bump == 'true'
+        run: |
+          uv pip install --system pytest
+          uv pip install --system dist/autoresearch-*.whl
+          pytest tests/ -q
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.bump == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.check.outputs.version }}
+          # Auto-generated release notes (PR titles + author tags) complement
+          # the human-readable CHANGELOG.md commitizen wrote at bump time.
+          generate_release_notes: true
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: ${{ contains(steps.check.outputs.version, 'alpha') || contains(steps.check.outputs.version, 'beta') || contains(steps.check.outputs.version, 'rc') }}
