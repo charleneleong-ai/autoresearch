@@ -1,8 +1,10 @@
-## Unreleased
+## v0.0.3 (2026-04-27)
 
-### Feat
+### Fix
 
-- **release**: tag-triggered GHA release + scripts/release.py helper
+- **devx**: pre-commit hooks (ruff + commitizen) + fix remaining E501
+- **lint**: satisfy ruff — Optional → X | None, disable B008 for typer
+- **release**: commitizen + GHA semver-driven auto-release on merge
 
 ## v0.0.2 (2026-04-27)
 
