@@ -19,7 +19,7 @@ uv add autoresearch                   # once published; until then:
 uv pip install git+https://github.com/charleneleong-ai/autoresearch.git
 ```
 
-## Usage (v0.1.0)
+## Usage (v0.0.2)
 
 ```python
 from autoresearch.results import load_results, log_experiment
@@ -69,7 +69,7 @@ The PR body must contain marker comments `<!-- SWEEP_NARRATIVE_START -->` and `<
 
 ## Status
 
-**v0.1.0 — Alpha, personal use.** All five modules (`results`, `charts`, `render`, `pr_updater`, `current_run`) are functional. Ported and validated against live multi-month sweeps.
+**v0.0.2 — Alpha, personal use.** All five modules (`results`, `charts`, `render`, `pr_updater`, `current_run`) are functional. Ported and validated against live multi-month sweeps.
 
 ## License
 
