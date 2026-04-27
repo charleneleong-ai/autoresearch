@@ -1,6 +1,6 @@
 [project]
 name = "autoresearch"
-version = "0.0.1"
+version = "0.0.2"
 description = "Self-driving experiment sweep loop — daemon-detached autoresearch.py + live PR-updating progress chart."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,6 +25,7 @@ dependencies = [
     "plotly>=5.20",
     "matplotlib>=3.8",
     "pyyaml>=6.0",
+    "typer>=0.12",
 ]
 
 [project.optional-dependencies]
@@ -36,9 +37,9 @@ Homepage = "https://github.com/charleneleong-ai/autoresearch"
 Issues = "https://github.com/charleneleong-ai/autoresearch/issues"
 
 [project.scripts]
-autoresearch-pr-updater = "autoresearch.pr_updater:main"
-autoresearch-current-run = "autoresearch.current_run:main"
-autoresearch-render = "autoresearch.render:main"
+autoresearch-pr-updater = "autoresearch.pr_updater:cli"
+autoresearch-current-run = "autoresearch.current_run:cli"
+autoresearch-render = "autoresearch.render:cli"
 
 [build-system]
 requires = ["hatchling"]

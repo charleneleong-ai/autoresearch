@@ -15,12 +15,12 @@ or triage vocabulary.
 """
 from __future__ import annotations
 
-import argparse
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
+import typer
 
 from autoresearch.results import load_results, tag_dir
 
@@ -229,31 +229,39 @@ def render(
     return out
 
 
-def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--experiments-dir", default="experiments")
-    p.add_argument("--tag", required=False)
-    p.add_argument("--config", dest="config_name", default=None,
-                   help="Per-config sub-dir for multi-sweep isolation")
-    p.add_argument("--out", default=None,
-                   help="Output PNG path. Defaults to <tag-dir>/progress.png")
-    p.add_argument("--title", default="Autoresearch progress")
-    p.add_argument("--score-field", default="score",
-                   help="JSONL field to plot on y-axis (e.g. 'score' or 'evaluation_score')")
-    p.add_argument("--score-label", default="Reward (higher is better)")
-    args = p.parse_args()
-
-    out = render(
-        experiments_dir=args.experiments_dir,
-        tag=args.tag,
-        config_name=args.config_name,
-        out=args.out,
-        title=args.title,
-        score_field=args.score_field,
-        score_label=args.score_label,
+def main(
+    experiments_dir: Path = typer.Option(Path("experiments"), "--experiments-dir"),
+    tag: Optional[str] = typer.Option(None, "--tag"),
+    config_name: Optional[str] = typer.Option(
+        None, "--config", help="Per-config sub-dir for multi-sweep isolation"
+    ),
+    out: Optional[Path] = typer.Option(
+        None, "--out", help="Output PNG path. Defaults to <tag-dir>/progress.png"
+    ),
+    title: str = typer.Option("Autoresearch progress", "--title"),
+    score_field: str = typer.Option(
+        "score", "--score-field",
+        help="JSONL field to plot on y-axis (e.g. 'score' or 'evaluation_score')",
+    ),
+    score_label: str = typer.Option("Reward (higher is better)", "--score-label"),
+) -> None:
+    out_path = render(
+        experiments_dir=experiments_dir,
+        tag=tag,
+        config_name=config_name,
+        out=out,
+        title=title,
+        score_field=score_field,
+        score_label=score_label,
     )
-    print(f"wrote {out}  ({out.stat().st_size // 1024} KB)")
+    print(f"wrote {out_path}  ({out_path.stat().st_size // 1024} KB)")
+
+
+def cli() -> None:
+    """Entry-point wrapper so the console script (`autoresearch-render`)
+    runs `main` through typer's argument parser."""
+    typer.run(main)
 
 
 if __name__ == "__main__":
-    main()
+    cli()
