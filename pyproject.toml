@@ -31,7 +31,13 @@ dependencies = [
 
 [project.optional-dependencies]
 pr = ["requests>=2.31"]
-dev = ["pytest>=8", "ruff>=0.6", "commitizen>=4.0", "build>=1.0"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "commitizen>=4.0",
+    "build>=1.0",
+    "pre-commit>=4.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/charleneleong-ai/autoresearch"
