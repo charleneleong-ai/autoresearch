@@ -202,7 +202,11 @@ def main(
         Path("experiments"), "--experiments-dir",
         help="Root dir holding tag/<config>/results.jsonl + progress.png",
     ),
-    poll_s: int = typer.Option(600, "--poll-s", help="Seconds between ticks (default 600 = 10 min)"),
+    poll_s: int = typer.Option(
+        600, "--poll-s",
+        envvar="AUTORESEARCH_PR_UPDATER_POLL_S",
+        help="Seconds between ticks (default 600 = 10 min)",
+    ),
     score_field: str = typer.Option("score", "--score-field", help="JSONL field to use as the headline score"),
     png_path: Optional[Path] = typer.Option(
         None, "--png-path", help="Override PNG output path (default: <tag-dir>/progress.png)"

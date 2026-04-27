@@ -135,7 +135,11 @@ def main(
     ),
     experiments_dir: Path = typer.Option(Path("experiments"), "--experiments-dir"),
     logs_dir: Path = typer.Option(Path("logs"), "--logs-dir"),
-    poll_s: int = typer.Option(15, "--poll-s"),
+    poll_s: int = typer.Option(
+        15, "--poll-s",
+        envvar="AUTORESEARCH_CURRENT_RUN_POLL_S",
+        help="Seconds between ticks (default 15)",
+    ),
 ) -> None:
     logs_dir = logs_dir.resolve()
     target_dir = tag_dir(experiments_dir, tag, config_name)
