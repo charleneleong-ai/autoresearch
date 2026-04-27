@@ -1,0 +1,79 @@
+# mise tasks for the autoresearch package.
+# Install mise: https://mise.jdx.dev/getting-started.html
+# List tasks:   mise tasks
+# Run a task:   mise run <name>  (or  mise run init)
+
+[tools]
+python = "3.11"
+uv = "latest"
+
+# ── Setup ─────────────────────────────────────────────────────────────
+
+[tasks.init]
+description = "First-time bootstrap: create .venv via stdlib + install all deps (incl. dev) from pyproject.toml"
+run = """
+set -e
+[ -d .venv ] && rm -rf .venv
+python3.11 -m venv .venv
+uv pip install -e '.[dev,pr]'
+echo ""
+.venv/bin/python -c "import autoresearch; print(f'✓ autoresearch {autoresearch.__version__}')"
+.venv/bin/cz version | xargs -I{} echo "✓ commitizen {}"
+"""
+
+[tasks.sync]
+description = "Refresh deps from pyproject.toml without recreating the venv."
+run = "uv pip install -e '.[dev,pr]'"
+
+# ── Test + lint ───────────────────────────────────────────────────────
+
+[tasks.test]
+description = "Run pytest."
+run = ".venv/bin/pytest tests/ -q"
+
+[tasks.lint]
+description = "Lint with ruff."
+run = ".venv/bin/ruff check src/ tests/"
+
+# ── Release (commitizen-driven) ───────────────────────────────────────
+
+[tasks.bump]
+description = "Bump version + update CHANGELOG.md + tag (auto-detect from commits). Pass --increment <patch|minor|major> to pin."
+run = ".venv/bin/cz bump"
+
+[tasks."bump-dry"]
+description = "Preview what `cz bump` would do without writing anything."
+run = ".venv/bin/cz bump --dry-run"
+
+[tasks.changelog]
+description = "Preview / regenerate CHANGELOG.md from existing tags (idempotent)."
+run = ".venv/bin/cz changelog"
+
+[tasks.release]
+description = "Manually bump + push (rarely needed — CI auto-releases on merge to main). Useful if main got a bumpable commit but CI was offline."
+run = """
+set -e
+.venv/bin/cz bump
+git push origin HEAD
+git push origin --tags
+echo "→ release.yml fires on tag push; check"
+echo "  https://github.com/charleneleong-ai/autoresearch/actions"
+"""
+
+# ── Build (manual, normally done by GHA on tag push) ──────────────────
+
+[tasks.build]
+description = "Build wheel + sdist locally to dist/. (CI does this automatically on tag push.)"
+run = """
+rm -rf dist/
+.venv/bin/python -m build
+ls -la dist/
+"""
+
+[tasks.clean]
+description = "Remove build artefacts + caches."
+run = """
+rm -rf dist/ build/ src/*.egg-info .pytest_cache .ruff_cache
+find . -type d -name __pycache__ -prune -exec rm -rf {} +
+echo "cleaned"
+"""

@@ -31,7 +31,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pr = ["requests>=2.31"]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "commitizen>=4.0", "build>=1.0"]
 
 [project.urls]
 Homepage = "https://github.com/charleneleong-ai/autoresearch"
@@ -58,3 +58,23 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
+
+# ── Commitizen — conventional-commit-driven releases ──────────────────
+# Bump versions + update CHANGELOG.md + tag with one command:
+#   cz bump --increment patch        # 0.0.2 → 0.0.3
+#   cz bump --increment minor        # 0.0.2 → 0.1.0
+#   cz bump                          # auto-detect from commits since last tag
+# Then `git push --follow-tags` fires .github/workflows/release.yml.
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.0.2"
+version_files = [
+    "pyproject.toml:^version",
+    "src/autoresearch/__init__.py:^__version__",
+]
+tag_format = "v$version"
+update_changelog_on_bump = true
+changelog_incremental = true
+# Major-version-zero: in 0.x.y, breaking changes bump minor (not major).
+# Drop this flag once we hit 1.0.0.
+major_version_zero = true

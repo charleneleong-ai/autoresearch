@@ -1,0 +1,33 @@
+name: CI
+
+# Lint + test on every PR + push to main. Releases are handled separately
+# by release.yml — which auto-bumps + tags + ships on push to main when
+# conventional commits since the last tag warrant a release (semver-driven
+# by commitizen).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    name: ruff + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install package + dev deps
+        run: uv pip install --system -e '.[dev,pr]'
+
+      - name: Lint with ruff
+        run: ruff check src/ tests/
+
+      - name: Test with pytest
+        run: pytest tests/ -q
