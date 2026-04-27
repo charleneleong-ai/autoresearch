@@ -1,6 +1,6 @@
 # autoresearch
 
-Self-driving experiment sweep loop — daemon-detached `autoresearch.py` + live PR-updating progress chart. Extracted from the [`autoresearch-loop` Claude skill](https://github.com/charleneleong-ai/dotfiles/tree/master/claude/plugins/research/skills/autoresearch-loop) and stabilised across multiple ML training projects.
+Self-driving experiment sweep loop — daemon-detached `autoresearch.py` + live PR-updating progress chart. Extracted from a coding-agent research-loop skill and stabilised across multiple ML training projects.
 
 ## What it does
 
@@ -50,7 +50,7 @@ autoresearch-render --tag my_sweep --config gemma   # per-config
 
 ### Daemons (PR refresher + in-flight chart row)
 
-Both daemons are intended to run detached so they survive SSH/CC death (verify `PPID=1` after launch):
+Both daemons are intended to run detached so they survive SSH or coding-agent session death (verify `PPID=1` after launch):
 
 ```bash
 # PR refresher: re-renders progress.png + regenerates progress.html + PATCHes PR body

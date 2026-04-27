@@ -21,9 +21,10 @@ The sidecar payload includes:
   iter_marker      — "Iter N/M" string
   wandb_url        — last wandb.ai URL spotted in this iter's log chunk
 
-Designed to run detached (`setsid + nohup + disown`) so it survives SSH /
-Claude Code session death — verify `PPID=1` after launch. Use `python -u`
-or `flush=True` on prints so the live log isn't silently buffered.
+Designed to run detached (`setsid + nohup + disown`) so it survives
+SSH / coding-agent session death — verify `PPID=1` after launch. Use
+`python -u` or `flush=True` on prints so the live log isn't silently
+buffered.
 
 Usage:
     autoresearch-current-run --tag <task> [--config <name>] [--logs-dir logs]
