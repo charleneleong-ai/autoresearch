@@ -10,16 +10,23 @@ uv = "latest"
 # ── Setup ─────────────────────────────────────────────────────────────
 
 [tasks.init]
-description = "First-time bootstrap: create .venv via stdlib + install all deps (incl. dev) from pyproject.toml"
+description = "First-time bootstrap: create .venv via stdlib + install all deps (incl. dev) from pyproject.toml + register pre-commit hooks"
 run = """
 set -e
 [ -d .venv ] && rm -rf .venv
 python3.11 -m venv .venv
 uv pip install -e '.[dev,pr]'
+.venv/bin/pre-commit install --install-hooks
+.venv/bin/pre-commit install --hook-type commit-msg
 echo ""
 .venv/bin/python -c "import autoresearch; print(f'✓ autoresearch {autoresearch.__version__}')"
 .venv/bin/cz version | xargs -I{} echo "✓ commitizen {}"
+echo "✓ pre-commit hooks registered (pre-commit + commit-msg)"
 """
+
+[tasks."pre-commit"]
+description = "Run all pre-commit hooks against the staged files (or pass --all-files)."
+run = ".venv/bin/pre-commit run"
 
 [tasks.sync]
 description = "Refresh deps from pyproject.toml without recreating the venv."

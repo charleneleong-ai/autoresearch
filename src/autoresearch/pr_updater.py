@@ -94,11 +94,15 @@ def _build_narrative(rows: list[dict[str, Any]], score_field: str = "score") -> 
     runtime = sum(r.get("runtime_min", 0) for r in rows)
     best = max(rows, key=score)
 
-    lines = [
+    summary = (
         f"_Last refresh: {_ts()}._ "
         f"**{len(rows)}** experiments · {n_kept} kept · {n_killed} killed · {n_crash} crashed"
         + (f" · {n_run} running" if n_run else "")
-        + f" · {runtime:.0f}min total · best so far: **{score(best):.2f}** (E{best['experiment']})\n",
+        + f" · {runtime:.0f}min total · "
+        + f"best so far: **{score(best):.2f}** (E{best['experiment']})\n"
+    )
+    lines = [
+        summary,
         "| E | status | score | runtime | notes |",
         "|---|---|---|---|---|",
     ]
@@ -208,11 +212,18 @@ def main(
         envvar="AUTORESEARCH_PR_UPDATER_POLL_S",
         help="Seconds between ticks (default 600 = 10 min)",
     ),
-    score_field: str = typer.Option("score", "--score-field", help="JSONL field to use as the headline score"),
-    png_path: Path | None = typer.Option(
-        None, "--png-path", help="Override PNG output path (default: <tag-dir>/progress.png)"
+    score_field: str = typer.Option(
+        "score", "--score-field",
+        help="JSONL field to use as the headline score",
     ),
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Working dir for git/gh subprocess calls (project root)"),
+    png_path: Path | None = typer.Option(
+        None, "--png-path",
+        help="Override PNG output path (default: <tag-dir>/progress.png)",
+    ),
+    cwd: Path = typer.Option(
+        Path("."), "--cwd",
+        help="Working dir for git/gh subprocess calls (project root)",
+    ),
 ) -> None:
     cwd = cwd.resolve()
     if png_path is None:
