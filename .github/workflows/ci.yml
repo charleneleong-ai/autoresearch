@@ -3,17 +3,31 @@ name: CI
 # Lint + test on every PR + push to main. Releases are handled separately
 # by release.yml — semver-driven by commitizen.
 #
-# Lint failures here mean a contributor skipped pre-commit; recover by
-# running `mise run lint` (or `ruff check src/ tests/ --fix`) locally.
-# CI does NOT auto-push fixes back to the PR branch — too noisy.
+# Lint runs via pre-commit so the CI checks match what `mise run init` +
+# `pre-commit install` enforces locally — single source of truth in
+# .pre-commit-config.yaml. Adding a new hook there auto-lands in CI.
 on:
   pull_request:
   push:
     branches: [main]
 
 jobs:
-  lint-and-test:
-    name: ruff + pytest
+  lint:
+    name: pre-commit (ruff + format + hygiene)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Runs every hook in .pre-commit-config.yaml against all files.
+      # Caches the hook envs by config-hash so subsequent runs are fast.
+      - uses: pre-commit/action@v3.0.1
+
+  test:
+    name: pytest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,9 +41,6 @@ jobs:
 
       - name: Install package + dev deps
         run: uv pip install --system -e '.[dev,pr]'
-
-      - name: Lint with ruff
-        run: ruff check src/ tests/
 
       - name: Test with pytest
         run: pytest tests/ -q
