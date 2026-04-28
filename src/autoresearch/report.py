@@ -30,8 +30,6 @@ manual edits). Pass `--force` to regenerate.
 
 from __future__ import annotations
 
-import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +89,33 @@ def _resolve_hydra_config(config_yaml: Path) -> dict[str, Any]:
     return merged
 
 
+def _autodetect_config_yaml(schedule: Path, config_name: str) -> Path | None:
+    """Find `configs/.../<config_name>.yaml` near a schedule yaml.
+
+    Tries in order:
+      1. Sibling of schedules dir: `<schedule.parent.parent>/<config>.yaml`
+         — matches gemma4-rl: configs/schedules/<sweep>.yaml + configs/<config>.yaml.
+      2. Recursive `<schedule.parent.parent>/**/<config>.yaml` (first hit) —
+         catches orak-style nested layouts: configs/<game>/agent/<config>.yaml.
+      3. Fallback: walk up to 3 parents from schedule looking for any
+         `<dir>/**/<config_name>.yaml` so schedules outside `configs/` work.
+
+    Returns None if nothing matches; caller falls back to placeholder text.
+    """
+    candidate = schedule.parent.parent / f"{config_name}.yaml"
+    if candidate.exists():
+        return candidate
+    search_root = schedule.parent.parent if schedule.parent.parent.exists() else schedule.parent
+    matches = sorted(search_root.rglob(f"{config_name}.yaml"))
+    if matches:
+        return matches[0]
+    for up in (schedule.parent, *schedule.parents[:3]):
+        matches = sorted(up.rglob(f"{config_name}.yaml"))
+        if matches:
+            return matches[0]
+    return None
+
+
 def _extract_chassis(config_yaml: Path | None) -> dict[str, Any]:
     """Pull chassis fields (model_name, lora_rank, ...) from a training config.
 
@@ -141,7 +166,7 @@ def _format_results_row(row: dict) -> dict:
         "no_halluc": h.get("no_hallucinated_facts_mean", "—"),
         "well_formed": h.get("well_formed_mean", "—"),
         "pass_all_pct": h.get("pass_all_pct", "—"),
-        "description": row.get("description", "").lstrip("[early_stopped] "),
+        "description": row.get("description", "").removeprefix("[early_stopped] "),
     }
 
 
@@ -154,15 +179,24 @@ def _render_skeleton(
 ) -> str:
     iters = schedule_data.get("iters", [])
     common = schedule_data.get("common_overrides", [])
-    schedule_yaml = yaml.safe_dump(schedule_data, sort_keys=False, default_flow_style=False).rstrip()
+    schedule_yaml = yaml.safe_dump(
+        schedule_data, sort_keys=False, default_flow_style=False
+    ).rstrip()
     chassis_line = _format_chassis_line(chassis or {})
 
+    schedule_link = (
+        f"[`configs/schedules/{schedule_name}.yaml`]"
+        f"(../../../configs/schedules/{schedule_name}.yaml)"
+    )
+    iter_count = (
+        f"{len(iters)} iters · {len(results)} rows logged" if results else f"{len(iters)} iters"
+    )
     header_section = f"""# `{schedule_name}` — <one-line hypothesis here>
 
-**Schedule:** [`configs/schedules/{schedule_name}.yaml`](../../../configs/schedules/{schedule_name}.yaml)
+**Schedule:** {schedule_link}
 **Config:** `{config_name}`
 {chassis_line}
-**Iterations:** {len(iters)} iters{f' · {len(results)} rows logged' if results else ''}
+**Iterations:** {iter_count}
 **Started:** <UTC timestamp> · **Finished:** <UTC timestamp> (<duration>)
 
 ## Hypothesis
@@ -188,18 +222,48 @@ def _render_skeleton(
 """
 
     if results:
-        rows = [_format_results_row(r) for r in results[-len(iters):]]
-        results_table = "\n## Results\n\n| iter | exp | steps | runtime | mean_total | f1 | no_halluc | well_formed | pass_all |\n|---|---|---|---|---|---|---|---|---|\n"
+        rows = [_format_results_row(r) for r in results[-len(iters) :]]
+        header = (
+            "| iter | exp | steps | runtime | mean_total | f1 | no_halluc"
+            " | well_formed | pass_all |"
+        )
+        sep = "|---|---|---|---|---|---|---|---|---|"
+        results_table = f"\n## Results\n\n{header}\n{sep}\n"
         for i, r in enumerate(rows, 1):
-            rt = f"{r['runtime_min']:.1f}m" if isinstance(r["runtime_min"], (int, float)) else r["runtime_min"]
-            mt = f"{r['mean_total']:.3f}" if isinstance(r["mean_total"], (int, float)) else r["mean_total"]
+            rt = (
+                f"{r['runtime_min']:.1f}m"
+                if isinstance(r["runtime_min"], (int, float))
+                else r["runtime_min"]
+            )
+            mt = (
+                f"{r['mean_total']:.3f}"
+                if isinstance(r["mean_total"], (int, float))
+                else r["mean_total"]
+            )
             f1 = f"{r['f1']:.3f}" if isinstance(r["f1"], (int, float)) else r["f1"]
-            nh = f"{r['no_halluc']:.3f}" if isinstance(r["no_halluc"], (int, float)) else r["no_halluc"]
-            wf = f"{r['well_formed']:+.3f}" if isinstance(r["well_formed"], (int, float)) else r["well_formed"]
-            pa = f"{r['pass_all_pct']}%" if isinstance(r["pass_all_pct"], (int, float)) else r["pass_all_pct"]
-            results_table += f"| {i}/{len(iters)} | E{r['experiment']} | {r['steps']} | {rt} | {mt} | {f1} | {nh} | {wf} | {pa} |\n"
+            nh = (
+                f"{r['no_halluc']:.3f}"
+                if isinstance(r["no_halluc"], (int, float))
+                else r["no_halluc"]
+            )
+            wf = (
+                f"{r['well_formed']:+.3f}"
+                if isinstance(r["well_formed"], (int, float))
+                else r["well_formed"]
+            )
+            pa = (
+                f"{r['pass_all_pct']}%"
+                if isinstance(r["pass_all_pct"], (int, float))
+                else r["pass_all_pct"]
+            )
+            results_table += (
+                f"| {i}/{len(iters)} | E{r['experiment']} | {r['steps']} | {rt}"
+                f" | {mt} | {f1} | {nh} | {wf} | {pa} |\n"
+            )
     else:
-        results_table = "\n## Results\n\n_No results.jsonl rows found yet — fill in once the sweep finishes._\n"
+        results_table = (
+            "\n## Results\n\n_No results.jsonl rows found yet — fill in once the sweep finishes._\n"
+        )
 
     verdict_section = """
 ## Verdict
@@ -248,8 +312,7 @@ def main(
     schedule_name = schedule.stem
 
     if config_yaml is None:
-        guess = schedule.parent.parent / f"{config}.yaml"
-        config_yaml = guess if guess.exists() else None
+        config_yaml = _autodetect_config_yaml(schedule, config)
     chassis = _extract_chassis(config_yaml)
 
     from autoresearch.results import load_results
@@ -267,9 +330,7 @@ def main(
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(body)
     chassis_note = f" [chassis: {len(chassis)} fields]" if chassis else " [chassis: not found]"
-    typer.echo(
-        f"wrote {out}  ({len(body):,} chars, {len(results)} results rows){chassis_note}"
-    )
+    typer.echo(f"wrote {out}  ({len(body):,} chars, {len(results)} results rows){chassis_note}")
 
 
 if __name__ == "__main__":
