@@ -33,16 +33,98 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import typer
 import yaml
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
+# Chassis fields we look up from a training config + its Hydra defaults chain.
+# Probed under both `train.<key>` (Hydra structured config) and the top level
+# (flat config). Missing fields are silently dropped from the chassis line.
+_CHASSIS_FIELDS = ("model_name", "lora_rank", "max_seq_length", "num_generations")
+
 
 def _format_iter_overrides(overrides: list[str]) -> str:
     """Pretty-print a flat list of `[--k, v, --k, v]` as `--k v --k v`."""
     return " ".join(str(x) for x in overrides) if overrides else "(none)"
+
+
+def _resolve_hydra_config(config_yaml: Path) -> dict[str, Any]:
+    """Load `config_yaml` and shallow-merge any Hydra `defaults:` chain.
+
+    Implements just enough of Hydra's defaults resolution to extract the
+    chassis fields — child config overrides parent. Skips `_self_` and
+    `???` entries; doesn't handle package overrides (`@pkg/foo`) since the
+    chassis fields we look up are stable across that.
+    """
+    if not config_yaml.exists():
+        return {}
+    data = yaml.safe_load(config_yaml.read_text()) or {}
+    defaults = data.get("defaults", []) or []
+    merged: dict[str, Any] = {}
+    for entry in defaults:
+        if entry in (None, "_self_") or (isinstance(entry, str) and entry.startswith("???")):
+            continue
+        name = entry if isinstance(entry, str) else next(iter(entry.values()), None)
+        if not name:
+            continue
+        parent_path = config_yaml.parent / f"{name}.yaml"
+        if parent_path.exists():
+            parent = _resolve_hydra_config(parent_path)
+            for k, v in parent.items():
+                if k != "defaults":
+                    merged[k] = (
+                        {**merged.get(k, {}), **v}
+                        if isinstance(v, dict) and isinstance(merged.get(k), dict)
+                        else v
+                    )
+    for k, v in data.items():
+        if k == "defaults":
+            continue
+        merged[k] = (
+            {**merged.get(k, {}), **v}
+            if isinstance(v, dict) and isinstance(merged.get(k), dict)
+            else v
+        )
+    return merged
+
+
+def _extract_chassis(config_yaml: Path | None) -> dict[str, Any]:
+    """Pull chassis fields (model_name, lora_rank, ...) from a training config.
+
+    Returns an empty dict if `config_yaml` is None or unreadable. Looks under
+    both `train.<key>` and top-level so it works with Hydra structured configs
+    and flat configs.
+    """
+    if config_yaml is None:
+        return {}
+    merged = _resolve_hydra_config(config_yaml)
+    train_block = merged.get("train", {}) if isinstance(merged.get("train"), dict) else {}
+    out: dict[str, Any] = {}
+    for field in _CHASSIS_FIELDS:
+        if field in train_block:
+            out[field] = train_block[field]
+        elif field in merged:
+            out[field] = merged[field]
+    return out
+
+
+def _format_chassis_line(chassis: dict[str, Any]) -> str:
+    """Render the chassis dict as a bullet line for the writeup header."""
+    if not chassis:
+        return "**Chassis:** `<model_name>` · LoRA r=<rank> · max_seq=<n> · num_generations=<n>"
+    parts = []
+    if "model_name" in chassis:
+        parts.append(f"`{chassis['model_name']}`")
+    if "lora_rank" in chassis:
+        parts.append(f"LoRA r={chassis['lora_rank']}")
+    if "max_seq_length" in chassis:
+        parts.append(f"max_seq={chassis['max_seq_length']}")
+    if "num_generations" in chassis:
+        parts.append(f"num_generations={chassis['num_generations']}")
+    return "**Chassis:** " + " · ".join(parts)
 
 
 def _format_results_row(row: dict) -> dict:
@@ -68,15 +150,18 @@ def _render_skeleton(
     schedule_data: dict,
     config_name: str,
     results: list[dict],
+    chassis: dict[str, Any] | None = None,
 ) -> str:
     iters = schedule_data.get("iters", [])
     common = schedule_data.get("common_overrides", [])
     schedule_yaml = yaml.safe_dump(schedule_data, sort_keys=False, default_flow_style=False).rstrip()
+    chassis_line = _format_chassis_line(chassis or {})
 
     header_section = f"""# `{schedule_name}` — <one-line hypothesis here>
 
 **Schedule:** [`configs/schedules/{schedule_name}.yaml`](../../../configs/schedules/{schedule_name}.yaml)
 **Config:** `{config_name}`
+{chassis_line}
 **Iterations:** {len(iters)} iters{f' · {len(results)} rows logged' if results else ''}
 **Started:** <UTC timestamp> · **Finished:** <UTC timestamp> (<duration>)
 
@@ -138,13 +223,21 @@ def main(
     tag: str = typer.Option(..., help="Task tag (e.g. dd_explainer)"),
     experiments_dir: Path = typer.Option(Path("experiments"), help="Root experiments dir"),
     out: Path = typer.Option(..., help="Output markdown path"),
+    config_yaml: Path | None = typer.Option(
+        None,
+        "--config-yaml",
+        help="Path to configs/<config>.yaml — autodetected as configs/<config>.yaml "
+        "next to the schedule if not given. Used to extract chassis (model_name, "
+        "lora_rank, max_seq_length, num_generations) into the writeup header.",
+    ),
     force: bool = typer.Option(False, "--force", help="Overwrite existing file"),
 ) -> None:
     """Emit a per-sweep writeup skeleton.
 
-    The skeleton inlines the schedule yaml and the per-iter results table,
-    leaves Hypothesis / Pre-launch comparisons / Verdict / Next move blank
-    for the author to fill.
+    The skeleton inlines the schedule yaml + a per-iter results table from
+    `results.jsonl`, and prefills a chassis line (model + LoRA + seq len)
+    from `configs/<config>.yaml` when that file is auto-detectable. Author
+    fills in Hypothesis / Pre-launch comparisons / Verdict / Next move.
     """
     if not schedule.exists():
         raise typer.BadParameter(f"schedule not found: {schedule}")
@@ -153,6 +246,11 @@ def main(
 
     schedule_data = yaml.safe_load(schedule.read_text())
     schedule_name = schedule.stem
+
+    if config_yaml is None:
+        guess = schedule.parent.parent / f"{config}.yaml"
+        config_yaml = guess if guess.exists() else None
+    chassis = _extract_chassis(config_yaml)
 
     from autoresearch.results import load_results
 
@@ -163,11 +261,15 @@ def main(
         schedule_data=schedule_data,
         config_name=config,
         results=results,
+        chassis=chassis,
     )
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(body)
-    typer.echo(f"wrote {out}  ({len(body):,} chars, {len(results)} results rows)")
+    chassis_note = f" [chassis: {len(chassis)} fields]" if chassis else " [chassis: not found]"
+    typer.echo(
+        f"wrote {out}  ({len(body):,} chars, {len(results)} results rows){chassis_note}"
+    )
 
 
 if __name__ == "__main__":
