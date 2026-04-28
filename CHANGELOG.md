@@ -1,3 +1,9 @@
+## v0.3.0 (2026-04-28)
+
+### Feat
+
+- **report**: dynamic relpath for schedule link, support any --out depth (#5)
+
 ## v0.2.0 (2026-04-28)
 
 ### Feat
