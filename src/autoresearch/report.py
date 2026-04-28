@@ -1,19 +1,21 @@
 """Per-sweep markdown writeup scaffolder.
 
-Emits a skeleton for `docs/experiments/<config_name>/<schedule_name>.md` from
-a schedule yaml + the matching `results.jsonl` rows. The author fills in the
-hypothesis, verdict, and next-move sections; the boilerplate (schedule yaml
-inline, per-iter results table, runtime accounting) is generated.
+Emits a skeleton for `docs/experiments/<tag>/<config_name>/<schedule_name>.md`
+from a schedule yaml + the matching `results.jsonl` rows. The author fills in
+the hypothesis, verdict, and next-move sections; the boilerplate (schedule
+yaml inline, per-iter results table, runtime accounting) is generated.
 
 Convention:
 
     docs/experiments/
-    └── <config_name>/
-        └── <schedule_name>.md   # one writeup per configs/schedules/*.yaml
+    └── <tag>/
+        └── <config_name>/
+            └── <schedule_name>.md   # one writeup per configs/schedules/*.yaml
 
 Mirrors the `experiments/<tag>/<config_name>/results.jsonl` layout from
-`autoresearch.results.tag_dir`, so any artefact (results row, schedule yaml,
-doc) maps cleanly to the other two.
+`autoresearch.results.tag_dir` 1:1 — `<tag>`, `<config_name>`, and
+`<schedule_name>` are the three keys you can trace from any artefact (results
+row, schedule yaml, runtime chart, doc) to the others.
 
 Usage:
 
@@ -22,7 +24,7 @@ Usage:
       --config train_v2_80gb \\
       --tag dd_explainer \\
       --experiments-dir experiments \\
-      --out docs/experiments/train_v2_80gb/v2_granular_no_halluc.md
+      --out docs/experiments/dd_explainer/train_v2_80gb/v2_granular_no_halluc.md
 
 If `--out` exists the command refuses to overwrite (safe to re-run after
 manual edits). Pass `--force` to regenerate.
@@ -30,6 +32,7 @@ manual edits). Pass `--force` to regenerate.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -176,6 +179,8 @@ def _render_skeleton(
     config_name: str,
     results: list[dict],
     chassis: dict[str, Any] | None = None,
+    schedule_path: Path | None = None,
+    out_path: Path | None = None,
 ) -> str:
     iters = schedule_data.get("iters", [])
     common = schedule_data.get("common_overrides", [])
@@ -184,10 +189,17 @@ def _render_skeleton(
     ).rstrip()
     chassis_line = _format_chassis_line(chassis or {})
 
-    schedule_link = (
-        f"[`configs/schedules/{schedule_name}.yaml`]"
-        f"(../../../configs/schedules/{schedule_name}.yaml)"
-    )
+    # Compute the schedule link as a relative path from the writeup's parent
+    # to the schedule yaml. Adapts to whatever depth `--out` lands at — works
+    # for two-level (<config>/<sweep>.md), three-level (<task>/<config>/<sweep>
+    # .md), and any other layout the caller chooses. Falls back to the canonical
+    # configs/schedules/<name>.yaml when paths can't be resolved.
+    if schedule_path is not None and out_path is not None:
+        rel = os.path.relpath(schedule_path.resolve(), out_path.parent.resolve())
+        schedule_href = rel.replace(os.sep, "/")
+    else:
+        schedule_href = f"configs/schedules/{schedule_name}.yaml"
+    schedule_link = f"[`configs/schedules/{schedule_name}.yaml`]({schedule_href})"
     iter_count = (
         f"{len(iters)} iters · {len(results)} rows logged" if results else f"{len(iters)} iters"
     )
@@ -319,15 +331,16 @@ def main(
 
     results = load_results(experiments_dir=experiments_dir, tag=tag, config_name=config)
 
+    out.parent.mkdir(parents=True, exist_ok=True)
     body = _render_skeleton(
         schedule_name=schedule_name,
         schedule_data=schedule_data,
         config_name=config,
         results=results,
         chassis=chassis,
+        schedule_path=schedule,
+        out_path=out,
     )
-
-    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(body)
     chassis_note = f" [chassis: {len(chassis)} fields]" if chassis else " [chassis: not found]"
     typer.echo(f"wrote {out}  ({len(body):,} chars, {len(results)} results rows){chassis_note}")
