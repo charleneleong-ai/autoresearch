@@ -1,8 +1,8 @@
-## Unreleased
+## v0.4.1 (2026-05-01)
 
 ### Refactor
 
-- **results**: shared `get_score(row, score_field=None)` and `filter_by_game(rows, game)` helpers — single source of truth for the `evaluation_score` ⇄ `score` field alias and the per-game row filter. `compare`, `render`, and `pr_updater` now share this code.
+- **results**: dedup score/game-filter helpers across modules (#8)
 
 ## v0.4.0 (2026-05-01)
 
