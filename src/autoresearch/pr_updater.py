@@ -49,7 +49,7 @@ import typer
 from rich import print as rprint
 
 from autoresearch.render import render
-from autoresearch.results import load_results, tag_dir
+from autoresearch.results import get_score, load_results, tag_dir
 
 MARKER_START = "<!-- SWEEP_NARRATIVE_START -->"
 MARKER_END = "<!-- SWEEP_NARRATIVE_END -->"
@@ -88,7 +88,7 @@ def _build_narrative(rows: list[dict[str, Any]], score_field: str = "score") -> 
         return "_(no results yet)_"
 
     def score(r):
-        return r.get(score_field, r.get("score", r.get("evaluation_score", 0.0)))
+        return get_score(r, score_field)
 
     n_kept = sum(1 for r in rows if r["status"] in ("KEEP", "BASELINE"))
     n_killed = sum(1 for r in rows if r["status"] == "EARLY_KILL")

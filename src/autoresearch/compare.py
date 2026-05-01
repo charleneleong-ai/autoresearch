@@ -66,7 +66,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import typer
 
-from autoresearch.results import load_results
+from autoresearch.results import filter_by_game, get_score, load_results
 
 app = typer.Typer(help="Cross-sweep comparison plots for autoresearch.")
 
@@ -74,16 +74,10 @@ app = typer.Typer(help="Cross-sweep comparison plots for autoresearch.")
 # ── helpers ────────────────────────────────────────────────────────────
 
 
-def _filter_game(rows: list[dict[str, Any]], game: str | None) -> list[dict[str, Any]]:
-    if not game:
-        return rows
-    return [r for r in rows if r.get("game") == game]
-
-
 def _best_score(rows: list[dict[str, Any]]) -> float:
     if not rows:
         return 0.0
-    return max(r.get("evaluation_score", r.get("score", 0)) for r in rows)
+    return max(get_score(r) for r in rows)
 
 
 # ── multi-tag overlay ──────────────────────────────────────────────────
@@ -141,7 +135,7 @@ def plot_multi_tag_overlay(
     by_label: dict[str, dict[int, float]] = {}
 
     for i, (tag, label) in enumerate(sweeps):
-        rows = _filter_game(
+        rows = filter_by_game(
             load_results(experiments_dir=experiments_dir, tag=tag, config_name=config_name),
             game,
         )
@@ -149,7 +143,7 @@ def plot_multi_tag_overlay(
             continue
         rows = sorted(rows, key=lambda r: r.get("experiment", 0))
         xs = [r.get("experiment", j) for j, r in enumerate(rows)]
-        ys = [r.get("evaluation_score", r.get("score", 0)) for r in rows]
+        ys = [get_score(r) for r in rows]
         statuses = [r.get("status", "?") for r in rows]
         sizes = [220 if s in ("KEEP", "BASELINE") else 100 for s in statuses]
         color = palette[i % len(palette)]
@@ -287,7 +281,7 @@ def plot_cross_game_scoreboard(
         labels = [s[1] for s in sweeps]
         values = [
             _best_score(
-                _filter_game(
+                filter_by_game(
                     load_results(
                         experiments_dir=experiments_dir, tag=s[0], config_name=config_name
                     ),

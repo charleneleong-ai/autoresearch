@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from autoresearch.results import load_results, log_experiment, tag_dir
+from autoresearch.results import (
+    filter_by_game,
+    get_score,
+    load_results,
+    log_experiment,
+    tag_dir,
+)
 
 
 def test_tag_dir_flat(tmp_path: Path) -> None:
@@ -90,6 +96,46 @@ def test_per_config_isolation(tmp_path: Path) -> None:
 
 def test_load_returns_empty_when_no_file(tmp_path: Path) -> None:
     assert load_results(tmp_path, "missing") == []
+
+
+# ── score / game-filter helpers ────────────────────────────────────────
+
+
+def test_get_score_prefers_evaluation_score() -> None:
+    assert get_score({"evaluation_score": 5.0, "score": 1.0}) == 5.0
+
+
+def test_get_score_falls_back_to_score() -> None:
+    assert get_score({"score": 1.0}) == 1.0
+
+
+def test_get_score_returns_zero_when_missing() -> None:
+    assert get_score({}) == 0.0
+
+
+def test_get_score_explicit_field_wins() -> None:
+    row = {"score": 1.0, "evaluation_score": 5.0, "custom": 9.0}
+    assert get_score(row, score_field="custom") == 9.0
+
+
+def test_get_score_explicit_field_falls_back_when_absent() -> None:
+    row = {"evaluation_score": 5.0}  # no "custom"
+    assert get_score(row, score_field="custom") == 5.0
+
+
+def test_filter_by_game_filters() -> None:
+    rows = [{"game": "a"}, {"game": "b"}, {"game": "a"}]
+    assert filter_by_game(rows, "a") == [{"game": "a"}, {"game": "a"}]
+
+
+def test_filter_by_game_none_returns_all() -> None:
+    rows = [{"game": "a"}, {"game": "b"}]
+    assert filter_by_game(rows, None) == rows
+
+
+def test_filter_by_game_empty_string_returns_all() -> None:
+    rows = [{"game": "a"}]
+    assert filter_by_game(rows, "") == rows
 
 
 if __name__ == "__main__":
