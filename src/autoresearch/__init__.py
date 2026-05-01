@@ -4,6 +4,10 @@ from __future__ import annotations
 
 __version__ = "0.0.3"
 
+from autoresearch.compare import (
+    plot_cross_game_scoreboard,
+    plot_multi_tag_overlay,
+)
 from autoresearch.gpu_monitor import GPUMonitor, GPUSample, GPUSummary
 from autoresearch.results import (
     load_results,
@@ -19,4 +23,6 @@ __all__ = [
     "GPUMonitor",
     "GPUSample",
     "GPUSummary",
+    "plot_multi_tag_overlay",
+    "plot_cross_game_scoreboard",
 ]

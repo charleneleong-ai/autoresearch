@@ -1,3 +1,9 @@
+## Unreleased
+
+### Feat
+
+- **compare**: cross-sweep comparison plots — `plot_multi_tag_overlay` (multiple sweeps on one iter axis with per-iter delta annotations) and `plot_cross_game_scoreboard` (per-game best-score panels). Both as functions and as `python -m autoresearch.compare {overlay,scoreboard}` CLI commands. Useful when the per-tag plotly chart from `render` is too sparse to read with only 2-4 iters.
+
 ## v0.3.0 (2026-04-28)
 
 ### Feat
