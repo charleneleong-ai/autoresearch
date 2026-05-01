@@ -1,8 +1,9 @@
 # autoresearch
 
-[![CI](https://github.com/charleneleong-ai/autoresearch/actions/workflows/ci.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/ci.yml)
+[![Lint](https://github.com/charleneleong-ai/autoresearch/actions/workflows/lint.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/lint.yml)
+[![Test](https://github.com/charleneleong-ai/autoresearch/actions/workflows/test.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/test.yml)
 [![Release](https://github.com/charleneleong-ai/autoresearch/actions/workflows/release.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/release.yml)
-[![PyPI version](https://img.shields.io/badge/version-v0.0.2-blue)](https://github.com/charleneleong-ai/autoresearch/releases/latest)
+[![Version](https://img.shields.io/badge/version-v0.4.1-blue)](https://github.com/charleneleong-ai/autoresearch/releases/latest)
 
 Self-driving experiment sweep loop — daemon-detached `autoresearch.py` + live PR-updating progress chart. Extracted from a coding-agent research-loop skill and stabilised across multiple ML training projects.
 
@@ -90,9 +91,10 @@ The PR body must contain marker comments `<!-- SWEEP_NARRATIVE_START -->` and `<
 
 ## Releasing — automatic on merge to main
 
-Releases are driven by [commitizen](https://commitizen-tools.github.io/commitizen/) and fire automatically on every merge to `main` whose commits warrant a bump. Two workflows split the work:
+Releases are driven by [commitizen](https://commitizen-tools.github.io/commitizen/) and fire automatically on every merge to `main` whose commits warrant a bump. Three workflows split the work:
 
-- **`ci.yml`** runs ruff + pytest on every PR and push to main (gates merge)
+- **`lint.yml`** runs pre-commit (ruff check + ruff format + hygiene hooks) on every PR and push to main
+- **`test.yml`** runs pytest on every PR and push to main (gates merge alongside lint)
 - **`release.yml`** runs on push to main and:
   1. Inspects commits since the last tag — if there's a `feat:` / `fix:` / `BREAKING CHANGE`, decides the semver increment; otherwise exits as a no-op
   2. `cz bump --yes` — bumps `pyproject.toml:version` + `src/autoresearch/__init__.py:__version__`, prepends a new section to `CHANGELOG.md`, commits as `bump: version X.Y.Z → A.B.C`, creates annotated tag `vA.B.C`
