@@ -1,7 +1,7 @@
 """Tests for autoresearch.compare — comparison plot helpers."""
+
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -18,15 +18,24 @@ def two_sweep_dir(tmp_path: Path) -> Path:
         game="game_x",
     )
     # Baseline sweep
-    log_experiment(**common, tag="baseline", score=4.0, status="KEEP",
-                   description="iter 0", runtime_min=10)
-    log_experiment(**common, tag="baseline", score=3.5, status="DISCARD",
-                   description="iter 1", runtime_min=10)
+    log_experiment(
+        **common, tag="baseline", score=4.0, status="KEEP", description="iter 0", runtime_min=10
+    )
+    log_experiment(
+        **common, tag="baseline", score=3.5, status="DISCARD", description="iter 1", runtime_min=10
+    )
     # Feature-on sweep
-    log_experiment(**common, tag="feature_on", score=6.0, status="KEEP",
-                   description="iter 0", runtime_min=10)
-    log_experiment(**common, tag="feature_on", score=5.0, status="DISCARD",
-                   description="iter 1", runtime_min=10)
+    log_experiment(
+        **common, tag="feature_on", score=6.0, status="KEEP", description="iter 0", runtime_min=10
+    )
+    log_experiment(
+        **common,
+        tag="feature_on",
+        score=5.0,
+        status="DISCARD",
+        description="iter 1",
+        runtime_min=10,
+    )
     return tmp_path
 
 
@@ -56,9 +65,15 @@ def test_overlay_handles_missing_tag(tmp_path: Path) -> None:
 
 
 def test_overlay_filters_by_game(two_sweep_dir: Path) -> None:
-    log_experiment(experiments_dir=str(two_sweep_dir), tag="baseline",
-                   game="other_game", score=99.0, status="KEEP",
-                   description="iter X", runtime_min=10)
+    log_experiment(
+        experiments_dir=str(two_sweep_dir),
+        tag="baseline",
+        game="other_game",
+        score=99.0,
+        status="KEEP",
+        description="iter X",
+        runtime_min=10,
+    )
     out = two_sweep_dir / "out.png"
     plot_multi_tag_overlay(
         sweeps=[("baseline", "Baseline")],

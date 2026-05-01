@@ -59,8 +59,9 @@ Python::
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import matplotlib.pyplot as plt
 import typer
@@ -156,18 +157,29 @@ def plot_multi_tag_overlay(
 
         ax.plot(xs, ys, "-", color=color, alpha=0.4, linewidth=2)
         ax.scatter(
-            xs, ys, c=color, s=sizes, marker=marker, edgecolors="white",
-            linewidths=1.5, zorder=3, label=label,
+            xs,
+            ys,
+            c=color,
+            s=sizes,
+            marker=marker,
+            edgecolors="white",
+            linewidths=1.5,
+            zorder=3,
+            label=label,
         )
-        for x, y, s in zip(xs, ys, statuses):
+        for x, y, s in zip(xs, ys, statuses, strict=False):
             ax.annotate(
                 f"{y:.2f}\n{s.lower()}",
-                xy=(x, y), xytext=(0, 12), textcoords="offset points",
-                ha="center", va="bottom", fontsize=9,
+                xy=(x, y),
+                xytext=(0, 12),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=9,
                 color=color,
                 fontweight="bold" if s in ("KEEP", "BASELINE") else "normal",
             )
-        by_label[label] = dict(zip(xs, ys))
+        by_label[label] = dict(zip(xs, ys, strict=False))
 
     if annotate_deltas and len(sweeps) >= 2:
         baseline_label = sweeps[0][1]
@@ -182,8 +194,12 @@ def plot_multi_tag_overlay(
                 ax.annotate(
                     f"{'+' if delta_pct >= 0 else ''}{delta_pct:.0f}%",
                     xy=(exp, (base + comp) / 2),
-                    xytext=(40, 0), textcoords="offset points",
-                    ha="left", va="center", fontsize=14, fontweight="bold",
+                    xytext=(40, 0),
+                    textcoords="offset points",
+                    ha="left",
+                    va="center",
+                    fontsize=14,
+                    fontweight="bold",
                     color="#2ca02c" if delta_pct > 0 else "#d62728",
                     arrowprops=dict(
                         arrowstyle="-[",
@@ -256,7 +272,8 @@ def plot_cross_game_scoreboard(
 
     n_games = len(games_to_sweeps)
     fig, axes = plt.subplots(
-        1, n_games,
+        1,
+        n_games,
         figsize=(figsize_per_panel[0] * n_games, figsize_per_panel[1]),
         dpi=dpi,
     )
@@ -266,19 +283,22 @@ def plot_cross_game_scoreboard(
 
     palette = ["#888", "#1f77b4", "#ff7f0e", "#9467bd", "#2ca02c", "#d62728"]
 
-    for ax, (game, sweeps) in zip(axes, games_to_sweeps.items()):
+    for ax, (game, sweeps) in zip(axes, games_to_sweeps.items(), strict=False):
         labels = [s[1] for s in sweeps]
         values = [
-            _best_score(_filter_game(
-                load_results(experiments_dir=experiments_dir, tag=s[0], config_name=config_name),
-                game,
-            ))
+            _best_score(
+                _filter_game(
+                    load_results(
+                        experiments_dir=experiments_dir, tag=s[0], config_name=config_name
+                    ),
+                    game,
+                )
+            )
             for s in sweeps
         ]
         n = len(labels)
         colors = [palette[i % len(palette)] for i in range(n)]
-        bars = ax.bar(range(n), values, color=colors, edgecolor="white",
-                      linewidth=2, zorder=3)
+        bars = ax.bar(range(n), values, color=colors, edgecolor="white", linewidth=2, zorder=3)
 
         if any(v > 0 for v in values):
             best_idx = max(range(n), key=lambda i: values[i])
@@ -289,10 +309,16 @@ def plot_cross_game_scoreboard(
 
         max_v = max(values) if any(v > 0 for v in values) else 1
         for i, v in enumerate(values):
-            ax.text(i, v + max_v * 0.02, f"{v:.2f}", ha="center", va="bottom",
-                    fontsize=11,
-                    fontweight="bold" if i == best_idx else "normal",
-                    color="#2ca02c" if i == best_idx else "#333")
+            ax.text(
+                i,
+                v + max_v * 0.02,
+                f"{v:.2f}",
+                ha="center",
+                va="bottom",
+                fontsize=11,
+                fontweight="bold" if i == best_idx else "normal",
+                color="#2ca02c" if i == best_idx else "#333",
+            )
 
         ax.set_xticks(range(n))
         ax.set_xticklabels(labels, rotation=20, ha="right", fontsize=9)
@@ -306,8 +332,16 @@ def plot_cross_game_scoreboard(
 
         verdict = (game_verdicts or {}).get(game)
         if verdict:
-            ax.text(0.5, -0.32, verdict, transform=ax.transAxes,
-                    ha="center", va="top", fontsize=10, fontweight="bold")
+            ax.text(
+                0.5,
+                -0.32,
+                verdict,
+                transform=ax.transAxes,
+                ha="center",
+                va="top",
+                fontsize=10,
+                fontweight="bold",
+            )
 
     if title:
         fig.suptitle(title, fontsize=13, color="#222", y=1.02)
@@ -324,10 +358,18 @@ def plot_cross_game_scoreboard(
 @app.command()
 def overlay(
     tag: list[str] = typer.Option(..., "--tag", "-t", help="Sweep tag (repeat for multi-sweep)"),
-    label: list[str] = typer.Option(..., "--label", "-l", help="Display label per tag (same order)"),
+    label: list[str] = typer.Option(
+        ...,
+        "--label",
+        "-l",
+        help="Display label per tag (same order)",
+    ),
     out: str = typer.Option(..., help="Output PNG path"),
     experiments_dir: str = typer.Option("experiments", help="Root experiments directory"),
-    config_name: str | None = typer.Option(None, help="Per-config sub-dir under experiments/<tag>/"),
+    config_name: str | None = typer.Option(
+        None,
+        help="Per-config sub-dir under experiments/<tag>/",
+    ),
     game: str | None = typer.Option(None, help="Filter to a specific game"),
     title: str | None = typer.Option(None, help="Plot title (default auto)"),
     no_deltas: bool = typer.Option(False, help="Disable per-iter delta annotations"),
@@ -338,7 +380,7 @@ def overlay(
             f"--tag count ({len(tag)}) must match --label count ({len(label)})"
         )
     p = plot_multi_tag_overlay(
-        sweeps=list(zip(tag, label)),
+        sweeps=list(zip(tag, label, strict=False)),
         experiments_dir=experiments_dir,
         config_name=config_name,
         game=game,
@@ -355,15 +397,21 @@ def scoreboard(
     experiments_dir: str = typer.Option("experiments", help="Root experiments directory"),
     config_name: str | None = typer.Option(None, help="Per-config sub-dir"),
     game: list[str] = typer.Option(
-        ..., "--game", "-g",
+        ...,
+        "--game",
+        "-g",
         help="Game name (repeat for multiple games — each game gets its own panel)",
     ),
     tag: list[str] = typer.Option(
-        ..., "--tag", "-t",
+        ...,
+        "--tag",
+        "-t",
         help="Sweep tag — these are MATCHED to games positionally via --sep",
     ),
     label: list[str] = typer.Option(
-        ..., "--label", "-l",
+        ...,
+        "--label",
+        "-l",
         help="Display label per tag, same order as --tag",
     ),
     sep: list[int] = typer.Option(
@@ -386,8 +434,10 @@ def scoreboard(
 
     games_to_sweeps: dict[str, list[tuple[str, str]]] = {}
     cursor = 0
-    for g, n in zip(game, sep):
-        games_to_sweeps[g] = list(zip(tag[cursor:cursor + n], label[cursor:cursor + n]))
+    for g, n in zip(game, sep, strict=False):
+        games_to_sweeps[g] = list(
+            zip(tag[cursor : cursor + n], label[cursor : cursor + n], strict=False)
+        )
         cursor += n
 
     p = plot_cross_game_scoreboard(
