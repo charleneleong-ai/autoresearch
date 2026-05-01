@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 import typer
 from rich import print as rprint
 
-from autoresearch.results import load_results, tag_dir
+from autoresearch.results import filter_by_game, get_score, load_results, tag_dir
 
 _STATUS_STYLE = {
     "DISCARD": {"color": "#cccccc", "line_color": "#999", "text_color": "#777"},
@@ -80,7 +80,7 @@ def _draw_axis(
         return
 
     def score(r):
-        return r.get(score_field, r.get("score", r.get("evaluation_score", 0)))
+        return get_score(r, score_field)
 
     best_exp = max(rows, key=score).get("experiment", 0)
 
@@ -209,7 +209,7 @@ def render(
         fig.patch.set_facecolor("white")
         for idx, game in enumerate(games):
             game_rows = sorted(
-                (r for r in rows if r.get("game") == game),
+                filter_by_game(rows, game),
                 key=lambda r: r.get("experiment", 0),
             )
             _draw_axis(

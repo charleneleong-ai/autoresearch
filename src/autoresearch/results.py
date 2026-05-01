@@ -17,6 +17,32 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# gemma4-rlvr writes "score"; orak writes "evaluation_score". Readers should
+# accept both — this list is the canonical fallback order.
+_SCORE_FIELDS: tuple[str, ...] = ("evaluation_score", "score")
+
+
+def get_score(row: dict[str, Any], score_field: str | None = None) -> float:
+    """Return a row's score, transparently handling the score/evaluation_score alias.
+
+    With ``score_field=None`` (default), tries ``evaluation_score`` then ``score``.
+    With ``score_field`` set, that field is tried first, then the canonical chain.
+    Returns ``0.0`` if nothing matches.
+    """
+    if score_field is not None and score_field in row:
+        return row[score_field]
+    for f in _SCORE_FIELDS:
+        if f in row:
+            return row[f]
+    return 0.0
+
+
+def filter_by_game(rows: list[dict[str, Any]], game: str | None) -> list[dict[str, Any]]:
+    """Return only rows whose ``game`` field matches. ``None`` returns rows unchanged."""
+    if not game:
+        return rows
+    return [r for r in rows if r.get("game") == game]
+
 
 def tag_dir(
     experiments_dir: str | Path,
@@ -80,8 +106,7 @@ def log_experiment(
     """
     existing = load_results(experiments_dir, tag, config_name)
     if game is not None:
-        per_game = [e for e in existing if e.get("game") == game]
-        experiment_num = len(per_game)
+        experiment_num = len(filter_by_game(existing, game))
     else:
         experiment_num = len(existing)
 
