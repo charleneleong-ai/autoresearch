@@ -7,7 +7,7 @@ a glance. This module generates after-the-fact static matplotlib charts
 that consume the same ``results.jsonl`` files and overlay multiple
 sweeps for direct comparison.
 
-Two flavours, both available as functions and as typer CLI commands:
+Three flavours, all available as functions and as typer CLI commands:
 
 * :func:`plot_multi_tag_overlay` — overlay multiple sweeps on the same
   iter axis, with per-iter percentage delta annotations between the
@@ -16,6 +16,12 @@ Two flavours, both available as functions and as typer CLI commands:
 * :func:`plot_cross_game_scoreboard` — bar chart per game, one bar per
   sweep, best evaluation score. Best for "where does feature X help?"
   summary questions.
+* :func:`plot_milestone_progression` — twin-axis line chart over a
+  hand-curated sequence of milestones (``label``, ``metrics``-dict).
+  Best for "where are we now across the project's checkpoints?" — the
+  cross-PR / cross-experiment trajectory view that doesn't fit the
+  per-tag results.jsonl shape because the data lives in scattered doc
+  verdict tables, not a single results file.
 
 Examples
 --------
@@ -60,11 +66,13 @@ Python::
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
 import typer
+import yaml
 
 from autoresearch.results import filter_by_game, get_score, load_results
 
@@ -346,6 +354,283 @@ def plot_cross_game_scoreboard(
     return out_path
 
 
+# ── milestone progression ──────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Milestone:
+    """One point in a cross-experiment progression chart.
+
+    Hand-authored from doc verdicts — these are the ``mean_total`` /
+    ``no_halluc`` numbers you copy out of n=1000 A/B tables, not data
+    pulled from a sweep's ``results.jsonl``.
+    """
+
+    label: str
+    metrics: dict[str, float]
+    description: str = ""
+
+
+def append_milestone(
+    yaml_path: str | Path,
+    *,
+    label: str,
+    metrics: dict[str, float],
+    description: str = "",
+) -> Path:
+    """Append a milestone entry to a milestones YAML, creating the file if missing.
+
+    Designed to be called once per sweep verdict — the milestones YAML
+    becomes the canonical chronological log of cross-experiment progress,
+    consumed by :func:`plot_milestone_progression`. Top-level metadata
+    (``title``, ``primary_metric``, ``threshold`` etc.) is preserved
+    as-is across appends; set those by hand once when seeding the file.
+
+    On a missing file, a stub ``{"milestones": []}`` is created — the
+    caller should follow up by editing the YAML to set ``title`` /
+    ``primary_metric`` / ``secondary_metric`` / ``threshold`` so the
+    chart has axis labels + a ship line.
+
+    Returns the YAML path written.
+    """
+    yaml_path = Path(yaml_path)
+    if yaml_path.exists():
+        raw = yaml.safe_load(yaml_path.read_text()) or {}
+        if not isinstance(raw, dict):
+            raise ValueError(f"{yaml_path}: top-level must be a mapping, got {type(raw).__name__}")
+    else:
+        raw = {"milestones": []}
+    raw.setdefault("milestones", [])
+    if not isinstance(raw["milestones"], list):
+        raise ValueError(f"{yaml_path}: 'milestones' must be a list")
+
+    entry: dict[str, Any] = {"label": label}
+    if description:
+        entry["description"] = description
+    entry["metrics"] = {k: float(v) for k, v in metrics.items()}
+    raw["milestones"].append(entry)
+
+    yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    yaml_path.write_text(yaml.safe_dump(raw, sort_keys=False, default_flow_style=False))
+    return yaml_path
+
+
+def load_milestones_yaml(path: str | Path) -> tuple[list[Milestone], dict[str, Any]]:
+    """Load a milestones YAML file into a list of :class:`Milestone`.
+
+    Schema (all top-level keys optional except ``milestones``)::
+
+        title: "..."                  # plot title (passed through)
+        primary_metric: mean_total    # default for plot_milestone_progression
+        secondary_metric: no_halluc   # ditto
+        threshold: -0.5
+        threshold_label: "ship"
+        milestones:
+          - label: vanilla
+            description: "Gemma 4 4B base, no fine-tune"
+            metrics:
+              mean_total: 8.354
+              no_halluc: -0.876
+          - label: E18
+            description: "v2 GRPO champion"
+            metrics:
+              mean_total: 9.324
+              no_halluc: -0.840
+
+    Returns ``(milestones, top_level_kwargs)``. The kwargs dict can be
+    splatted directly into :func:`plot_milestone_progression`.
+    """
+    raw = yaml.safe_load(Path(path).read_text())
+    if not isinstance(raw, dict) or "milestones" not in raw:
+        raise ValueError(f"{path}: top-level must be a mapping with a 'milestones' key")
+    milestones = [
+        Milestone(
+            label=str(m["label"]),
+            metrics={k: float(v) for k, v in (m.get("metrics") or {}).items()},
+            description=str(m.get("description") or ""),
+        )
+        for m in raw["milestones"]
+    ]
+    kwargs = {k: v for k, v in raw.items() if k != "milestones"}
+    return milestones, kwargs
+
+
+def plot_milestone_progression(
+    milestones: Sequence[Milestone],
+    *,
+    primary_metric: str,
+    secondary_metric: str | None = None,
+    primary_label: str | None = None,
+    secondary_label: str | None = None,
+    primary_color: str = "#2563eb",
+    secondary_color: str = "#dc2626",
+    primary_ylim: tuple[float, float] | None = None,
+    secondary_ylim: tuple[float, float] | None = None,
+    threshold: float | None = None,
+    threshold_label: str = "",
+    threshold_axis: str = "secondary",
+    threshold_color: str = "#16a34a",
+    title: str | None = None,
+    out_path: str | Path,
+    figsize: tuple[float, float] = (11.0, 5.5),
+    dpi: int = 120,
+    highlight_last: bool = True,
+    annotate_primary: bool = True,
+) -> Path:
+    """Twin-axis line chart over a hand-curated sequence of milestones.
+
+    Use this when you want a "where are we now?" trajectory view across
+    multiple experiments / PRs — the cross-checkpoint chart that doesn't
+    fit the per-tag ``results.jsonl`` shape that
+    :func:`plot_multi_tag_overlay` consumes. Each milestone is a fixed
+    ``(label, metrics-dict)`` pair authored by the researcher; the
+    metrics are typically copied from doc verdict tables (n=1000 A/B
+    results sitting in scattered PR descriptions and writeups).
+
+    Plots ``primary_metric`` on the left axis as a solid line, and
+    optionally ``secondary_metric`` on a twin right axis as a dashed
+    line. A horizontal reference at ``threshold`` (on whichever axis is
+    named in ``threshold_axis``) marks the falsification / ship-as-champion
+    line. The last milestone is circled when ``highlight_last`` is true,
+    and primary values are labelled inline by default.
+
+    Parameters
+    ----------
+    milestones:
+        Sequence of :class:`Milestone`. ``metrics`` for each must contain
+        the requested ``primary_metric`` and (if set) ``secondary_metric``;
+        missing keys become ``None`` and are dropped from the line.
+    primary_metric, secondary_metric:
+        Keys into each milestone's ``metrics`` dict.
+    primary_label, secondary_label:
+        Y-axis labels. Default to the metric name.
+    threshold, threshold_label:
+        Optional horizontal reference line + annotation. Common use:
+        ``-0.5`` "ship-as-champion" line for a hallucination metric.
+    threshold_axis:
+        ``"primary"`` or ``"secondary"`` — which axis the threshold lives
+        on. Default ``"secondary"``.
+    out_path:
+        Where to write the PNG. Parent dirs are created.
+
+    Returns
+    -------
+    Path
+        The output PNG path.
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not milestones:
+        raise ValueError("milestones must be non-empty")
+
+    xs = list(range(len(milestones)))
+    labels = [m.label for m in milestones]
+    primary_vals: list[float | None] = [m.metrics.get(primary_metric) for m in milestones]
+    if all(v is None for v in primary_vals):
+        raise ValueError(f"no milestone has metric {primary_metric!r}")
+
+    fig, ax_primary = plt.subplots(figsize=figsize, dpi=dpi)
+    fig.patch.set_facecolor("white")
+    ax_primary.set_facecolor("white")
+
+    valid_primary = [(x, v) for x, v in zip(xs, primary_vals, strict=False) if v is not None]
+    line_primary = ax_primary.plot(
+        [x for x, _ in valid_primary],
+        [v for _, v in valid_primary],
+        "-o",
+        color=primary_color,
+        linewidth=2.2,
+        markersize=7,
+        label=f"{primary_metric} (left axis)",
+    )[0]
+
+    if annotate_primary:
+        for x, v in valid_primary:
+            ax_primary.annotate(
+                f"{v:.2f}",
+                (x, v),
+                textcoords="offset points",
+                xytext=(0, 8),
+                ha="center",
+                fontsize=8,
+                color=primary_color,
+            )
+
+    if highlight_last and valid_primary:
+        last_x, last_v = valid_primary[-1]
+        ax_primary.scatter(
+            [last_x],
+            [last_v],
+            s=160,
+            facecolors="none",
+            edgecolors=primary_color,
+            linewidth=2,
+            zorder=5,
+        )
+
+    ax_secondary = None
+    line_secondary = None
+    if secondary_metric is not None:
+        secondary_vals: list[float | None] = [m.metrics.get(secondary_metric) for m in milestones]
+        valid_secondary = [
+            (x, v) for x, v in zip(xs, secondary_vals, strict=False) if v is not None
+        ]
+        if valid_secondary:
+            ax_secondary = ax_primary.twinx()
+            line_secondary = ax_secondary.plot(
+                [x for x, _ in valid_secondary],
+                [v for _, v in valid_secondary],
+                "--s",
+                color=secondary_color,
+                linewidth=2.0,
+                markersize=6,
+                label=f"{secondary_metric} (right axis)",
+            )[0]
+            ax_secondary.set_ylabel(
+                secondary_label or secondary_metric,
+                color=secondary_color,
+            )
+            ax_secondary.tick_params(axis="y", labelcolor=secondary_color)
+            if secondary_ylim is not None:
+                ax_secondary.set_ylim(*secondary_ylim)
+
+    if threshold is not None:
+        target_ax = ax_secondary if (threshold_axis == "secondary" and ax_secondary) else ax_primary
+        target_ax.axhline(threshold, color=threshold_color, linestyle=":", alpha=0.5, linewidth=1)
+        if threshold_label:
+            target_ax.text(
+                len(milestones) - 0.5,
+                threshold,
+                f"  {threshold} {threshold_label}",
+                color=threshold_color,
+                fontsize=8,
+                va="bottom",
+                ha="right",
+            )
+
+    ax_primary.set_xticks(xs)
+    ax_primary.set_xticklabels(labels, rotation=20, ha="right")
+    ax_primary.set_ylabel(primary_label or primary_metric, color=primary_color)
+    ax_primary.tick_params(axis="y", labelcolor=primary_color)
+    if primary_ylim is not None:
+        ax_primary.set_ylim(*primary_ylim)
+    ax_primary.grid(True, alpha=0.25)
+
+    if title:
+        ax_primary.set_title(title, fontsize=11, pad=12)
+
+    handles = [line_primary]
+    if line_secondary is not None:
+        handles.append(line_secondary)
+    ax_primary.legend(handles=handles, loc="lower right", framealpha=0.9, fontsize=9)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return out_path
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 
@@ -442,6 +727,105 @@ def scoreboard(
         title=title,
     )
     typer.echo(f"wrote {p}")
+
+
+@app.command()
+def progression(
+    milestones_yaml: str = typer.Option(
+        ...,
+        "--milestones-yaml",
+        "-m",
+        help="Path to milestones YAML (see Milestone schema in load_milestones_yaml).",
+    ),
+    out: str = typer.Option(..., help="Output PNG path"),
+    primary: str | None = typer.Option(
+        None,
+        help="Primary metric name (left axis). Falls back to YAML 'primary_metric'.",
+    ),
+    secondary: str | None = typer.Option(
+        None,
+        help="Secondary metric name (right axis). Falls back to YAML 'secondary_metric'.",
+    ),
+    threshold: float | None = typer.Option(
+        None,
+        help="Horizontal reference line value. Falls back to YAML 'threshold'.",
+    ),
+    threshold_label: str | None = typer.Option(None, help="Label next to the threshold line."),
+    title: str | None = typer.Option(None, help="Plot title. Falls back to YAML 'title'."),
+) -> None:
+    """Cross-experiment trajectory chart from a hand-curated YAML of milestones."""
+    milestones, defaults = load_milestones_yaml(milestones_yaml)
+    pri = primary or defaults.get("primary_metric")
+    if not pri:
+        raise typer.BadParameter(
+            "primary metric required: pass --primary or set 'primary_metric' in YAML"
+        )
+    p = plot_milestone_progression(
+        milestones,
+        primary_metric=pri,
+        secondary_metric=secondary or defaults.get("secondary_metric"),
+        threshold=threshold if threshold is not None else defaults.get("threshold"),
+        threshold_label=(
+            threshold_label
+            if threshold_label is not None
+            else (defaults.get("threshold_label") or "")
+        ),
+        title=title or defaults.get("title"),
+        out_path=out,
+    )
+    typer.echo(f"wrote {p}")
+
+
+@app.command("append-milestone")
+def append_milestone_cmd(
+    milestones_yaml: str = typer.Option(
+        ...,
+        "--milestones-yaml",
+        "-m",
+        help="Target YAML — appended to in place, created if missing.",
+    ),
+    label: str = typer.Option(..., "--label", help="Milestone label (e.g. v3_slot_grounded)."),
+    description: str = typer.Option(
+        "", "--description", help="Free-text description of what changed."
+    ),
+    metric: list[str] = typer.Option(
+        ...,
+        "--metric",
+        help="Metric in KEY=VALUE form (numeric). Repeat for multiple metrics.",
+    ),
+) -> None:
+    """Append one milestone entry to a milestones YAML.
+
+    Example::
+
+        autoresearch-compare append-milestone \\
+            -m docs/experiments/dd_explainer/milestones.yaml \\
+            --label v3_slot_grounded \\
+            --description "Slot-grounded JSON output" \\
+            --metric mean_total=10.96 \\
+            --metric no_halluc=-0.48
+
+    Numbers come from wherever (eval scripts, results.jsonl, hand-typed
+    n=1000 verdict tables) — this command is intentionally decoupled
+    from any specific compute path so it works for sweep-driven and
+    one-off-eval-driven pipelines alike.
+    """
+    metrics_dict: dict[str, float] = {}
+    for m in metric:
+        if "=" not in m:
+            raise typer.BadParameter(f"--metric must be KEY=VALUE, got {m!r}")
+        k, _, v = m.partition("=")
+        try:
+            metrics_dict[k.strip()] = float(v)
+        except ValueError as e:
+            raise typer.BadParameter(f"--metric {m!r}: value must be numeric") from e
+    p = append_milestone(
+        milestones_yaml,
+        label=label,
+        metrics=metrics_dict,
+        description=description,
+    )
+    typer.echo(f"appended {label} to {p}")
 
 
 def cli() -> None:

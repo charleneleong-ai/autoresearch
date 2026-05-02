@@ -5,7 +5,11 @@ from __future__ import annotations
 __version__ = "0.5.1"
 
 from autoresearch.compare import (
+    Milestone,
+    append_milestone,
+    load_milestones_yaml,
     plot_cross_game_scoreboard,
+    plot_milestone_progression,
     plot_multi_tag_overlay,
 )
 from autoresearch.gpu_monitor import GPUMonitor, GPUSample, GPUSummary
@@ -37,6 +41,10 @@ __all__ = [
     "GPUSummary",
     "plot_multi_tag_overlay",
     "plot_cross_game_scoreboard",
+    "plot_milestone_progression",
+    "Milestone",
+    "load_milestones_yaml",
+    "append_milestone",
     "GameSpec",
     "GameVerdict",
     "VerdictSpec",

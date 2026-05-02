@@ -22,7 +22,7 @@ wheels = [
 
 [[package]]
 name = "autoresearch"
-version = "0.0.3"
+version = "0.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },
