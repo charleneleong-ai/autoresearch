@@ -1,3 +1,9 @@
+## v0.6.0 (2026-05-02)
+
+### Feat
+
+- **compare**: plot_milestone_progression — cross-experiment trajectory chart (#14)
+
 ## v0.5.1 (2026-05-02)
 
 ### Fix
