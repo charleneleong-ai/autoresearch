@@ -48,6 +48,7 @@ autoresearch-pr-updater = "autoresearch.pr_updater:cli"
 autoresearch-current-run = "autoresearch.current_run:cli"
 autoresearch-render = "autoresearch.render:cli"
 autoresearch-report = "autoresearch.report:app"
+autoresearch-verdict = "autoresearch.verdict:app"
 
 [build-system]
 requires = ["hatchling"]
