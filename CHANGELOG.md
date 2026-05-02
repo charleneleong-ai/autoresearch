@@ -1,3 +1,10 @@
+## v0.5.1 (2026-05-02)
+
+### Fix
+
+- **release**: trust cz exit code; drop fragile output-text matching (#13)
+- **release**: treat cz exit-21 (NO_COMMITS_TO_BUMP) as clean skip (#12)
+
 ## v0.5.0 (2026-05-02)
 
 ### Feat
