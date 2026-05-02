@@ -66,6 +66,24 @@ autoresearch-render --tag my_sweep                  # flat
 autoresearch-render --tag my_sweep --config gemma   # per-config
 ```
 
+```bash
+# Append a new milestone after each sweep verdict — milestones.yaml is the
+# canonical chronological log of cross-experiment progress. File is created
+# on first append; seed top-level title / primary_metric / threshold by hand
+# once (see examples/milestones.example.yaml for the full schema).
+autoresearch-compare append-milestone \
+  --milestones-yaml docs/experiments/<task>/milestones.yaml \
+  --label v3_slot_grounded \
+  --description "Slot-grounded JSON output" \
+  --metric mean_total=10.96 \
+  --metric no_halluc=-0.48
+
+# Render the trajectory chart from the same YAML
+autoresearch-compare progression \
+  --milestones-yaml docs/experiments/<task>/milestones.yaml \
+  --out milestones.png
+```
+
 ### Daemons (PR refresher + in-flight chart row)
 
 Both daemons are intended to run detached so they survive SSH or coding-agent session death (verify `PPID=1` after launch):
@@ -94,7 +112,7 @@ Alpha, personal use. Validated against live multi-month sweeps. Current modules 
 | `results` | JSONL I/O for `experiments/<tag>[/<config>]/results.jsonl`; `get_score` / `filter_by_game` helpers |
 | `charts` | Plotly label-toggle widget for live HTML charts |
 | `render` | Static matplotlib PNG render — Plotly fallback for headless / minimal envs |
-| `compare` | Cross-sweep comparison plots — multi-tag overlay + cross-game scoreboard |
+| `compare` | Cross-sweep comparison plots — multi-tag overlay, cross-game scoreboard, milestone progression |
 | `pr_updater` | Daemon: re-renders progress.png + commits + patches PR body between markers |
 | `current_run` | Daemon: in-flight RUNNING dot driver |
 | `report` | Per-sweep markdown writeup scaffolder |

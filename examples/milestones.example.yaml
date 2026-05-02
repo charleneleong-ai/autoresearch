@@ -1,0 +1,45 @@
+# Example milestones file for `autoresearch-compare progression`.
+#
+# Each milestone is one point on the chart. The `metrics` dict can hold
+# any number of keys; the chart picks `primary_metric` (left axis) and
+# optionally `secondary_metric` (right axis, dashed).
+#
+# Numbers are typically copied by hand from n=1000 A/B verdict tables
+# in PR descriptions / experiment writeups — not loaded from a sweep's
+# results.jsonl (use plot_multi_tag_overlay for that).
+#
+# Render with:
+#   autoresearch-compare progression \
+#       --milestones-yaml examples/milestones.example.yaml \
+#       --out milestones.png
+
+title: "Project trajectory — vanilla → champion"
+primary_metric: mean_total
+secondary_metric: no_halluc
+threshold: -0.5
+threshold_label: "ship-as-champion"
+
+milestones:
+  - label: vanilla
+    description: "Base model, no fine-tune"
+    metrics:
+      mean_total: 8.35
+      no_halluc: -0.88
+
+  - label: v1_grpo
+    description: "First GRPO sweep — trigger F1 climbs"
+    metrics:
+      mean_total: 9.32
+      no_halluc: -0.84
+
+  - label: v2_constrained
+    description: "Schema-constrained decoding"
+    metrics:
+      mean_total: 10.01
+      no_halluc: -0.61
+
+  - label: v3_slot_grounded
+    description: "Slot-grounded JSON output"
+    metrics:
+      mean_total: 10.96
+      no_halluc: -0.48
