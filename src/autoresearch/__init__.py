@@ -7,6 +7,7 @@ __version__ = "0.6.0"
 from autoresearch.compare import (
     Milestone,
     append_milestone,
+    extract_metrics_from_results_jsonl,
     load_milestones_yaml,
     plot_cross_game_scoreboard,
     plot_milestone_progression,
@@ -45,6 +46,7 @@ __all__ = [
     "Milestone",
     "load_milestones_yaml",
     "append_milestone",
+    "extract_metrics_from_results_jsonl",
     "GameSpec",
     "GameVerdict",
     "VerdictSpec",

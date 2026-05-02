@@ -78,7 +78,18 @@ autoresearch-compare append-milestone \
   --metric mean_total=10.96 \
   --metric no_halluc=-0.48
 
-# Render the trajectory chart from the same YAML
+# Or pull metrics directly from a sweep's results.jsonl (no hand-typing)
+autoresearch-compare append-milestone \
+  --milestones-yaml docs/experiments/<task>/milestones.yaml \
+  --label e25_run \
+  --from-results-jsonl experiments/<task>/<config>/results.jsonl \
+  --row best \
+  --extract mean_total=metrics.heldout.mean_total \
+  --extract no_halluc=metrics.heldout.no_hallucinated_facts_mean
+
+# Render the trajectory chart from the same YAML.
+# `primary_metric` / `secondary_metric` accept either a scalar or a list
+# (stacks multiple lines on the same axis — see examples/milestones.stacked.example.yaml).
 autoresearch-compare progression \
   --milestones-yaml docs/experiments/<task>/milestones.yaml \
   --out milestones.png
