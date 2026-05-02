@@ -9,6 +9,7 @@ import pytest
 from autoresearch.compare import (
     Milestone,
     append_milestone,
+    extract_metrics_from_results_jsonl,
     load_milestones_yaml,
     plot_cross_game_scoreboard,
     plot_milestone_progression,
@@ -299,3 +300,132 @@ def test_append_milestone_rejects_non_mapping_root(tmp_path: Path) -> None:
     bad.write_text("- just\n- a\n- list\n")
     with pytest.raises(ValueError, match="must be a mapping"):
         append_milestone(bad, label="x", metrics={"score": 1.0})
+
+
+# ── multi-metric per axis ─────────────────────────────────────────────
+
+
+def test_progression_multi_primary(tmp_path: Path) -> None:
+    """A list of primary metrics stacks N lines on the left axis."""
+    milestones = [
+        Milestone(label="v0", metrics={"a": 1.0, "b": 2.0, "c": 3.0}),
+        Milestone(label="v1", metrics={"a": 1.5, "b": 2.5, "c": 3.5}),
+    ]
+    out = tmp_path / "stacked.png"
+    plot_milestone_progression(
+        milestones,
+        primary_metric=["a", "b", "c"],
+        out_path=out,
+    )
+    assert out.exists()
+    assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_progression_multi_primary_and_secondary(tmp_path: Path) -> None:
+    milestones = [
+        Milestone(label="v0", metrics={"a": 1.0, "b": 2.0, "x": -0.9, "y": -0.7}),
+        Milestone(label="v1", metrics={"a": 1.5, "b": 2.5, "x": -0.6, "y": -0.5}),
+    ]
+    out = tmp_path / "both_stacked.png"
+    plot_milestone_progression(
+        milestones,
+        primary_metric=["a", "b"],
+        secondary_metric=["x", "y"],
+        threshold=-0.5,
+        threshold_label="ship",
+        out_path=out,
+    )
+    assert out.exists()
+
+
+def test_progression_string_metric_still_works(tmp_path: Path) -> None:
+    """Single-metric (str) call path is unchanged for backwards compat."""
+    milestones = [Milestone(label=f"v{i}", metrics={"score": float(i)}) for i in range(3)]
+    out = tmp_path / "single.png"
+    plot_milestone_progression(
+        milestones,
+        primary_metric="score",
+        out_path=out,
+    )
+    assert out.exists()
+
+
+def test_progression_mutual_exclusion_color_vs_colors(tmp_path: Path) -> None:
+    milestones = [Milestone(label="a", metrics={"score": 1.0})]
+    with pytest.raises(ValueError, match="primary_color or primary_colors"):
+        plot_milestone_progression(
+            milestones,
+            primary_metric="score",
+            primary_color="#000",
+            primary_colors=["#fff", "#000"],
+            out_path=tmp_path / "x.png",
+        )
+
+
+# ── extract from results.jsonl ────────────────────────────────────────
+
+
+def _write_jsonl(path: Path, rows: list[dict]) -> Path:
+    import json as _json
+
+    path.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
+    return path
+
+
+def test_extract_last_row(tmp_path: Path) -> None:
+    rows = [
+        {"score": 5.0, "metrics": {"heldout": {"mean_total": 8.5, "no_halluc": -0.9}}},
+        {"score": 7.5, "metrics": {"heldout": {"mean_total": 10.9, "no_halluc": -0.5}}},
+    ]
+    path = _write_jsonl(tmp_path / "results.jsonl", rows)
+    out = extract_metrics_from_results_jsonl(
+        path,
+        {
+            "mean_total": "metrics.heldout.mean_total",
+            "no_halluc": "metrics.heldout.no_halluc",
+        },
+        row="last",
+    )
+    assert out == {"mean_total": 10.9, "no_halluc": -0.5}
+
+
+def test_extract_best_row_uses_get_score(tmp_path: Path) -> None:
+    """`row='best'` selects via get_score, not chronologically."""
+    rows = [
+        {"score": 9.0, "metrics": {"heldout": {"mean_total": 11.0}}},
+        {"score": 7.5, "metrics": {"heldout": {"mean_total": 10.0}}},  # newer but lower score
+    ]
+    path = _write_jsonl(tmp_path / "results.jsonl", rows)
+    out = extract_metrics_from_results_jsonl(
+        path, {"mean_total": "metrics.heldout.mean_total"}, row="best"
+    )
+    assert out == {"mean_total": 11.0}
+
+
+def test_extract_missing_path_raises(tmp_path: Path) -> None:
+    rows = [{"score": 1.0, "metrics": {"heldout": {"mean_total": 1.0}}}]
+    path = _write_jsonl(tmp_path / "results.jsonl", rows)
+    with pytest.raises(KeyError, match="missing_segment"):
+        extract_metrics_from_results_jsonl(
+            path, {"x": "metrics.heldout.missing_segment"}, row="last"
+        )
+
+
+def test_extract_non_numeric_raises(tmp_path: Path) -> None:
+    rows = [{"score": 1.0, "status": "BASELINE"}]
+    path = _write_jsonl(tmp_path / "results.jsonl", rows)
+    with pytest.raises(TypeError, match="non-numeric"):
+        extract_metrics_from_results_jsonl(path, {"x": "status"}, row="last")
+
+
+def test_extract_empty_jsonl_raises(tmp_path: Path) -> None:
+    path = tmp_path / "empty.jsonl"
+    path.write_text("")
+    with pytest.raises(ValueError, match="no rows"):
+        extract_metrics_from_results_jsonl(path, {"x": "score"}, row="last")
+
+
+def test_extract_invalid_row_arg(tmp_path: Path) -> None:
+    path = _write_jsonl(tmp_path / "results.jsonl", [{"score": 1.0}])
+    with pytest.raises(ValueError, match="'last' or 'best'"):
+        extract_metrics_from_results_jsonl(path, {"x": "score"}, row="median")

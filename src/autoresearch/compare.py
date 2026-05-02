@@ -65,6 +65,7 @@ Python::
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -371,6 +372,56 @@ class Milestone:
     description: str = ""
 
 
+def _walk_dot_path(data: Any, path: str) -> float:
+    """Resolve a dot-path (``"metrics.heldout.mean_total"``) on a nested dict.
+
+    Returns the leaf as ``float``. Raises ``KeyError`` if any segment is
+    missing and ``TypeError`` if the leaf is not numeric.
+    """
+    cur: Any = data
+    for seg in path.split("."):
+        if not isinstance(cur, dict) or seg not in cur:
+            raise KeyError(f"path {path!r} not found at segment {seg!r}")
+        cur = cur[seg]
+    if isinstance(cur, bool) or not isinstance(cur, (int, float)):
+        raise TypeError(f"path {path!r} resolved to non-numeric {type(cur).__name__}: {cur!r}")
+    return float(cur)
+
+
+def extract_metrics_from_results_jsonl(
+    results_jsonl: str | Path,
+    extract: dict[str, str],
+    *,
+    row: str = "last",
+) -> dict[str, float]:
+    """Pull a metrics dict from one row of a sweep's ``results.jsonl``.
+
+    ``extract`` maps milestone-metric names to dot-paths into the row
+    (e.g. ``{"mean_total": "metrics.heldout.mean_total"}``). ``row`` is
+    ``"last"`` (default) or ``"best"`` (highest :func:`get_score`).
+
+    Designed for the ``autoresearch-compare append-milestone
+    --from-results-jsonl`` CLI mode — keeps the sweep-→-milestone path
+    one command long without coupling :func:`append_milestone` itself
+    to a specific row schema.
+    """
+    rows: list[dict[str, Any]] = []
+    with Path(results_jsonl).open() as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    if not rows:
+        raise ValueError(f"{results_jsonl}: no rows")
+    if row == "last":
+        chosen = rows[-1]
+    elif row == "best":
+        chosen = max(rows, key=get_score)
+    else:
+        raise ValueError(f"--row must be 'last' or 'best', got {row!r}")
+    return {dest: _walk_dot_path(chosen, path) for dest, path in extract.items()}
+
+
 def append_milestone(
     yaml_path: str | Path,
     *,
@@ -455,15 +506,31 @@ def load_milestones_yaml(path: str | Path) -> tuple[list[Milestone], dict[str, A
     return milestones, kwargs
 
 
+_PRIMARY_PALETTE = ("#2563eb", "#0ea5e9", "#14b8a6", "#6366f1")
+_SECONDARY_PALETTE = ("#dc2626", "#f97316", "#eab308", "#a855f7")
+_PRIMARY_MARKERS = ("o", "^", "s", "D")
+_SECONDARY_MARKERS = ("s", "D", "v", "P")
+
+
+def _to_metric_list(arg: str | Sequence[str] | None) -> list[str]:
+    if arg is None:
+        return []
+    if isinstance(arg, str):
+        return [arg]
+    return list(arg)
+
+
 def plot_milestone_progression(
     milestones: Sequence[Milestone],
     *,
-    primary_metric: str,
-    secondary_metric: str | None = None,
+    primary_metric: str | Sequence[str],
+    secondary_metric: str | Sequence[str] | None = None,
     primary_label: str | None = None,
     secondary_label: str | None = None,
-    primary_color: str = "#2563eb",
-    secondary_color: str = "#dc2626",
+    primary_color: str | None = None,
+    secondary_color: str | None = None,
+    primary_colors: Sequence[str] | None = None,
+    secondary_colors: Sequence[str] | None = None,
     primary_ylim: tuple[float, float] | None = None,
     secondary_ylim: tuple[float, float] | None = None,
     threshold: float | None = None,
@@ -487,23 +554,30 @@ def plot_milestone_progression(
     metrics are typically copied from doc verdict tables (n=1000 A/B
     results sitting in scattered PR descriptions and writeups).
 
-    Plots ``primary_metric`` on the left axis as a solid line, and
-    optionally ``secondary_metric`` on a twin right axis as a dashed
-    line. A horizontal reference at ``threshold`` (on whichever axis is
-    named in ``threshold_axis``) marks the falsification / ship-as-champion
-    line. The last milestone is circled when ``highlight_last`` is true,
-    and primary values are labelled inline by default.
+    Plots one or more ``primary_metric`` keys on the left axis as solid
+    lines, and optionally one or more ``secondary_metric`` keys on a twin
+    right axis as dashed lines. Pass a string for the single-metric case
+    (preserves the original visual) or a list to stack multiple lines on
+    the same axis. A horizontal reference at ``threshold`` (on whichever
+    axis is named in ``threshold_axis``) marks the falsification /
+    ship-as-champion line. The last milestone of the first primary
+    metric is circled when ``highlight_last`` is true, and the first
+    primary metric's values are labelled inline by default.
 
     Parameters
     ----------
     milestones:
-        Sequence of :class:`Milestone`. ``metrics`` for each must contain
-        the requested ``primary_metric`` and (if set) ``secondary_metric``;
-        missing keys become ``None`` and are dropped from the line.
+        Sequence of :class:`Milestone`. ``metrics`` for each should contain
+        the requested keys; missing keys become ``None`` and are dropped
+        from that line.
     primary_metric, secondary_metric:
-        Keys into each milestone's ``metrics`` dict.
-    primary_label, secondary_label:
-        Y-axis labels. Default to the metric name.
+        ``str`` for one line, or ``Sequence[str]`` to stack multiple
+        lines on the same axis (one per metric).
+    primary_color, secondary_color:
+        Singular alias for ``primary_colors[0]`` / ``secondary_colors[0]``
+        — kept for backwards compatibility with the single-metric API.
+        Pass ``primary_colors`` / ``secondary_colors`` for multi-metric
+        per-line control; if neither is set, the built-in palette is used.
     threshold, threshold_label:
         Optional horizontal reference line + annotation. Common use:
         ``-0.5`` "ship-as-champion" line for a hallucination metric.
@@ -524,29 +598,68 @@ def plot_milestone_progression(
     if not milestones:
         raise ValueError("milestones must be non-empty")
 
+    primary_keys = _to_metric_list(primary_metric)
+    secondary_keys = _to_metric_list(secondary_metric)
+    if not primary_keys:
+        raise ValueError("primary_metric must be a string or non-empty sequence")
+
+    if primary_colors is not None and primary_color is not None:
+        raise ValueError("pass either primary_color or primary_colors, not both")
+    if secondary_colors is not None and secondary_color is not None:
+        raise ValueError("pass either secondary_color or secondary_colors, not both")
+
+    primary_palette: list[str] = (
+        list(primary_colors)
+        if primary_colors is not None
+        else ([primary_color, *_PRIMARY_PALETTE[1:]] if primary_color else list(_PRIMARY_PALETTE))
+    )
+    secondary_palette: list[str] = (
+        list(secondary_colors)
+        if secondary_colors is not None
+        else (
+            [secondary_color, *_SECONDARY_PALETTE[1:]]
+            if secondary_color
+            else list(_SECONDARY_PALETTE)
+        )
+    )
+
     xs = list(range(len(milestones)))
     labels = [m.label for m in milestones]
-    primary_vals: list[float | None] = [m.metrics.get(primary_metric) for m in milestones]
-    if all(v is None for v in primary_vals):
-        raise ValueError(f"no milestone has metric {primary_metric!r}")
 
     fig, ax_primary = plt.subplots(figsize=figsize, dpi=dpi)
     fig.patch.set_facecolor("white")
     ax_primary.set_facecolor("white")
 
-    valid_primary = [(x, v) for x, v in zip(xs, primary_vals, strict=False) if v is not None]
-    line_primary = ax_primary.plot(
-        [x for x, _ in valid_primary],
-        [v for _, v in valid_primary],
-        "-o",
-        color=primary_color,
-        linewidth=2.2,
-        markersize=7,
-        label=f"{primary_metric} (left axis)",
-    )[0]
+    handles: list[Any] = []
 
-    if annotate_primary:
-        for x, v in valid_primary:
+    primary_lines = []
+    first_valid_primary: list[tuple[int, float]] = []
+    for i, key in enumerate(primary_keys):
+        vals: list[float | None] = [m.metrics.get(key) for m in milestones]
+        valid = [(x, v) for x, v in zip(xs, vals, strict=False) if v is not None]
+        if not valid:
+            if i == 0:
+                raise ValueError(f"no milestone has metric {key!r}")
+            continue
+        color = primary_palette[i % len(primary_palette)]
+        marker = _PRIMARY_MARKERS[i % len(_PRIMARY_MARKERS)]
+        line = ax_primary.plot(
+            [x for x, _ in valid],
+            [v for _, v in valid],
+            f"-{marker}",
+            color=color,
+            linewidth=2.2,
+            markersize=7,
+            label=f"{key} (left axis)",
+        )[0]
+        primary_lines.append((key, color, line))
+        handles.append(line)
+        if i == 0:
+            first_valid_primary = valid
+
+    if annotate_primary and first_valid_primary:
+        annotate_color = primary_palette[0]
+        for x, v in first_valid_primary:
             ax_primary.annotate(
                 f"{v:.2f}",
                 (x, v),
@@ -554,44 +667,48 @@ def plot_milestone_progression(
                 xytext=(0, 8),
                 ha="center",
                 fontsize=8,
-                color=primary_color,
+                color=annotate_color,
             )
 
-    if highlight_last and valid_primary:
-        last_x, last_v = valid_primary[-1]
+    if highlight_last and first_valid_primary:
+        last_x, last_v = first_valid_primary[-1]
         ax_primary.scatter(
             [last_x],
             [last_v],
             s=160,
             facecolors="none",
-            edgecolors=primary_color,
+            edgecolors=primary_palette[0],
             linewidth=2,
             zorder=5,
         )
 
     ax_secondary = None
-    line_secondary = None
-    if secondary_metric is not None:
-        secondary_vals: list[float | None] = [m.metrics.get(secondary_metric) for m in milestones]
-        valid_secondary = [
-            (x, v) for x, v in zip(xs, secondary_vals, strict=False) if v is not None
-        ]
-        if valid_secondary:
-            ax_secondary = ax_primary.twinx()
-            line_secondary = ax_secondary.plot(
-                [x for x, _ in valid_secondary],
-                [v for _, v in valid_secondary],
-                "--s",
-                color=secondary_color,
+    if secondary_keys:
+        for i, key in enumerate(secondary_keys):
+            vals = [m.metrics.get(key) for m in milestones]
+            valid = [(x, v) for x, v in zip(xs, vals, strict=False) if v is not None]
+            if not valid:
+                continue
+            if ax_secondary is None:
+                ax_secondary = ax_primary.twinx()
+            color = secondary_palette[i % len(secondary_palette)]
+            marker = _SECONDARY_MARKERS[i % len(_SECONDARY_MARKERS)]
+            line = ax_secondary.plot(
+                [x for x, _ in valid],
+                [v for _, v in valid],
+                f"--{marker}",
+                color=color,
                 linewidth=2.0,
                 markersize=6,
-                label=f"{secondary_metric} (right axis)",
+                label=f"{key} (right axis)",
             )[0]
-            ax_secondary.set_ylabel(
-                secondary_label or secondary_metric,
-                color=secondary_color,
+            handles.append(line)
+        if ax_secondary is not None:
+            sec_label = secondary_label or (
+                secondary_keys[0] if len(secondary_keys) == 1 else "metrics (right)"
             )
-            ax_secondary.tick_params(axis="y", labelcolor=secondary_color)
+            ax_secondary.set_ylabel(sec_label, color=secondary_palette[0])
+            ax_secondary.tick_params(axis="y", labelcolor=secondary_palette[0])
             if secondary_ylim is not None:
                 ax_secondary.set_ylim(*secondary_ylim)
 
@@ -611,8 +728,9 @@ def plot_milestone_progression(
 
     ax_primary.set_xticks(xs)
     ax_primary.set_xticklabels(labels, rotation=20, ha="right")
-    ax_primary.set_ylabel(primary_label or primary_metric, color=primary_color)
-    ax_primary.tick_params(axis="y", labelcolor=primary_color)
+    pri_label = primary_label or (primary_keys[0] if len(primary_keys) == 1 else "metrics (left)")
+    ax_primary.set_ylabel(pri_label, color=primary_palette[0])
+    ax_primary.tick_params(axis="y", labelcolor=primary_palette[0])
     if primary_ylim is not None:
         ax_primary.set_ylim(*primary_ylim)
     ax_primary.grid(True, alpha=0.25)
@@ -620,10 +738,8 @@ def plot_milestone_progression(
     if title:
         ax_primary.set_title(title, fontsize=11, pad=12)
 
-    handles = [line_primary]
-    if line_secondary is not None:
-        handles.append(line_secondary)
-    ax_primary.legend(handles=handles, loc="lower right", framealpha=0.9, fontsize=9)
+    if handles:
+        ax_primary.legend(handles=handles, loc="lower right", framealpha=0.9, fontsize=9)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight", facecolor="white")
@@ -729,6 +845,16 @@ def scoreboard(
     typer.echo(f"wrote {p}")
 
 
+def _resolve_axis_metrics(
+    cli_values: list[str],
+    yaml_default: Any,
+) -> str | list[str] | None:
+    """CLI flag wins; otherwise pass YAML value through (str or list)."""
+    if cli_values:
+        return cli_values if len(cli_values) > 1 else cli_values[0]
+    return yaml_default
+
+
 @app.command()
 def progression(
     milestones_yaml: str = typer.Option(
@@ -738,13 +864,21 @@ def progression(
         help="Path to milestones YAML (see Milestone schema in load_milestones_yaml).",
     ),
     out: str = typer.Option(..., help="Output PNG path"),
-    primary: str | None = typer.Option(
-        None,
-        help="Primary metric name (left axis). Falls back to YAML 'primary_metric'.",
+    primary: list[str] = typer.Option(
+        [],
+        "--primary",
+        help=(
+            "Primary metric name (left axis). Repeat to stack multiple lines on the "
+            "same axis. Falls back to YAML 'primary_metric' (scalar or list)."
+        ),
     ),
-    secondary: str | None = typer.Option(
-        None,
-        help="Secondary metric name (right axis). Falls back to YAML 'secondary_metric'.",
+    secondary: list[str] = typer.Option(
+        [],
+        "--secondary",
+        help=(
+            "Secondary metric name (right axis). Repeat to stack multiple lines on the "
+            "same axis. Falls back to YAML 'secondary_metric' (scalar or list)."
+        ),
     ),
     threshold: float | None = typer.Option(
         None,
@@ -755,15 +889,16 @@ def progression(
 ) -> None:
     """Cross-experiment trajectory chart from a hand-curated YAML of milestones."""
     milestones, defaults = load_milestones_yaml(milestones_yaml)
-    pri = primary or defaults.get("primary_metric")
+    pri = _resolve_axis_metrics(primary, defaults.get("primary_metric"))
     if not pri:
         raise typer.BadParameter(
             "primary metric required: pass --primary or set 'primary_metric' in YAML"
         )
+    sec = _resolve_axis_metrics(secondary, defaults.get("secondary_metric"))
     p = plot_milestone_progression(
         milestones,
         primary_metric=pri,
-        secondary_metric=secondary or defaults.get("secondary_metric"),
+        secondary_metric=sec,
         threshold=threshold if threshold is not None else defaults.get("threshold"),
         threshold_label=(
             threshold_label
@@ -789,14 +924,41 @@ def append_milestone_cmd(
         "", "--description", help="Free-text description of what changed."
     ),
     metric: list[str] = typer.Option(
-        ...,
+        [],
         "--metric",
         help="Metric in KEY=VALUE form (numeric). Repeat for multiple metrics.",
+    ),
+    from_results_jsonl: Path | None = typer.Option(
+        None,
+        "--from-results-jsonl",
+        help="Pull metrics from this sweep's results.jsonl (combine with --extract).",
+    ),
+    extract: list[str] = typer.Option(
+        [],
+        "--extract",
+        help=(
+            "DEST=DOT.PATH (e.g. mean_total=metrics.heldout.mean_total). "
+            "Only used with --from-results-jsonl. Repeat for multiple metrics."
+        ),
+    ),
+    row: str = typer.Option(
+        "last",
+        "--row",
+        help="Which results.jsonl row to read: 'last' (default) or 'best' (highest score).",
     ),
 ) -> None:
     """Append one milestone entry to a milestones YAML.
 
-    Example::
+    Two ways to provide metrics — combine freely, ``--metric`` overrides
+    on key conflict:
+
+    \b
+    --metric KEY=VALUE         hand-typed numbers (n=1000 eval verdicts)
+    --from-results-jsonl PATH  pull from a sweep's results.jsonl
+      --extract DEST=DOT.PATH  required: which fields to lift out
+      --row last|best          which row to read (default last)
+
+    Example — hand-typed n=1000 verdict::
 
         autoresearch-compare append-milestone \\
             -m docs/experiments/dd_explainer/milestones.yaml \\
@@ -805,12 +967,36 @@ def append_milestone_cmd(
             --metric mean_total=10.96 \\
             --metric no_halluc=-0.48
 
-    Numbers come from wherever (eval scripts, results.jsonl, hand-typed
-    n=1000 verdict tables) — this command is intentionally decoupled
-    from any specific compute path so it works for sweep-driven and
-    one-off-eval-driven pipelines alike.
+    Example — pull from a sweep's results.jsonl::
+
+        autoresearch-compare append-milestone \\
+            -m docs/experiments/dd_explainer/milestones.yaml \\
+            --label e25_run \\
+            --from-results-jsonl experiments/dd_explainer/train_v2_80gb/results.jsonl \\
+            --row best \\
+            --extract mean_total=metrics.heldout.mean_total \\
+            --extract no_halluc=metrics.heldout.no_hallucinated_facts_mean
     """
     metrics_dict: dict[str, float] = {}
+
+    if from_results_jsonl is not None:
+        if not extract:
+            raise typer.BadParameter(
+                "--from-results-jsonl requires at least one --extract DEST=DOT.PATH"
+            )
+        extract_map: dict[str, str] = {}
+        for e in extract:
+            if "=" not in e:
+                raise typer.BadParameter(f"--extract must be DEST=DOT.PATH, got {e!r}")
+            k, _, v = e.partition("=")
+            extract_map[k.strip()] = v.strip()
+        try:
+            metrics_dict.update(
+                extract_metrics_from_results_jsonl(from_results_jsonl, extract_map, row=row)
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise typer.BadParameter(str(exc)) from exc
+
     for m in metric:
         if "=" not in m:
             raise typer.BadParameter(f"--metric must be KEY=VALUE, got {m!r}")
@@ -819,6 +1005,12 @@ def append_milestone_cmd(
             metrics_dict[k.strip()] = float(v)
         except ValueError as e:
             raise typer.BadParameter(f"--metric {m!r}: value must be numeric") from e
+
+    if not metrics_dict:
+        raise typer.BadParameter(
+            "no metrics provided: pass --metric KEY=VALUE and/or --from-results-jsonl --extract"
+        )
+
     p = append_milestone(
         milestones_yaml,
         label=label,

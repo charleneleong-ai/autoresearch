@@ -1,0 +1,49 @@
+# Example milestones file showing multi-metric per axis (stacked lines).
+#
+# `primary_metric` / `secondary_metric` accept either a scalar (one line)
+# or a list (one line per metric on the same axis). Useful when you want
+# to track 3-4 KPIs side-by-side in one chart instead of two.
+#
+# Render with:
+#   autoresearch-compare progression \
+#       --milestones-yaml examples/milestones.stacked.example.yaml \
+#       --out milestones.stacked.png
+
+title: "Project trajectory — multi-metric view"
+primary_metric: [mean_total, f1_triggers]
+secondary_metric: [no_halluc, well_formed]
+threshold: -0.5
+threshold_label: "ship-as-champion"
+
+milestones:
+  - label: vanilla
+    description: "Base model, no fine-tune"
+    metrics:
+      mean_total: 8.35
+      f1_triggers: 6.20
+      no_halluc: -0.88
+      well_formed: 0.40
+
+  - label: v1_grpo
+    description: "First GRPO sweep"
+    metrics:
+      mean_total: 9.32
+      f1_triggers: 7.80
+      no_halluc: -0.84
+      well_formed: 0.55
+
+  - label: v2_constrained
+    description: "Schema-constrained decoding"
+    metrics:
+      mean_total: 10.01
+      f1_triggers: 8.60
+      no_halluc: -0.61
+      well_formed: 0.62
+
+  - label: v3_slot_grounded
+    description: "Slot-grounded JSON output"
+    metrics:
+      mean_total: 10.96
+      f1_triggers: 9.10
+      no_halluc: -0.48
+      well_formed: 0.75
