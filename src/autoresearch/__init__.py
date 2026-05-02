@@ -10,13 +10,25 @@ from autoresearch.compare import (
 )
 from autoresearch.gpu_monitor import GPUMonitor, GPUSample, GPUSummary
 from autoresearch.results import (
+    filter_by_game,
+    get_score,
     load_results,
     log_experiment,
     tag_dir,
 )
+from autoresearch.verdict import (
+    GameSpec,
+    GameVerdict,
+    VerdictSpec,
+    compute_verdict,
+    format_markdown,
+    load_spec,
+)
 
 __all__ = [
     "__version__",
+    "filter_by_game",
+    "get_score",
     "load_results",
     "log_experiment",
     "tag_dir",
@@ -25,4 +37,10 @@ __all__ = [
     "GPUSummary",
     "plot_multi_tag_overlay",
     "plot_cross_game_scoreboard",
+    "GameSpec",
+    "GameVerdict",
+    "VerdictSpec",
+    "compute_verdict",
+    "format_markdown",
+    "load_spec",
 ]
