@@ -1,8 +1,8 @@
-## Unreleased
+## v0.5.0 (2026-05-02)
 
 ### Feat
 
-- **verdict**: cross-tag ablation verdict module + `autoresearch-verdict` CLI. Takes a yaml spec describing per-game `(baseline, comparison?, treatment)` sweep tags, computes best-score deltas, classifies HELPS / NEUTRAL / REGRESSES at a configurable threshold, renders a markdown table, and optionally posts to a GitHub PR via `gh`. `--wait-iters N` polls until all treatment sweeps reach the target iter count before computing — replaces project-side ablation daemons. Reuses `results.{load_results, get_score, filter_by_game}` so the score-alias logic stays in one place.
+- **verdict**: cross-tag ablation verdict module + CLI (#10)
 
 ## v0.4.1 (2026-05-01)
 
