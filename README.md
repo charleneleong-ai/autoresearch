@@ -3,7 +3,7 @@
 [![Lint](https://github.com/charleneleong-ai/autoresearch/actions/workflows/lint.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/lint.yml)
 [![Test](https://github.com/charleneleong-ai/autoresearch/actions/workflows/test.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/test.yml)
 [![Release](https://github.com/charleneleong-ai/autoresearch/actions/workflows/release.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-v0.4.1-blue)](https://github.com/charleneleong-ai/autoresearch/releases/latest)
+[![Version](https://img.shields.io/badge/version-v0.5.0-blue)](https://github.com/charleneleong-ai/autoresearch/releases/latest)
 
 Self-driving experiment sweep loop — daemon-detached `autoresearch.py` + live PR-updating progress chart. Extracted from a coding-agent research-loop skill and stabilised across multiple ML training projects.
 
@@ -37,7 +37,7 @@ mise run bump-dry    # previews the next release bump
 
 (Setup uses `python3.11 -m venv .venv && uv pip install -e '.[dev,pr]'` under the hood — see `mise.toml`.)
 
-## Usage (v0.0.2)
+## Usage
 
 ```python
 from autoresearch.results import load_results, log_experiment
@@ -87,7 +87,19 @@ The PR body must contain marker comments `<!-- SWEEP_NARRATIVE_START -->` and `<
 
 ## Status
 
-**v0.0.2 — Alpha, personal use.** All five modules (`results`, `charts`, `render`, `pr_updater`, `current_run`) are functional. Ported and validated against live multi-month sweeps.
+Alpha, personal use. Validated against live multi-month sweeps. Current modules — see [`CHANGELOG.md`](CHANGELOG.md) for what landed in each release:
+
+| Module | Purpose |
+|---|---|
+| `results` | JSONL I/O for `experiments/<tag>[/<config>]/results.jsonl`; `get_score` / `filter_by_game` helpers |
+| `charts` | Plotly label-toggle widget for live HTML charts |
+| `render` | Static matplotlib PNG render — Plotly fallback for headless / minimal envs |
+| `compare` | Cross-sweep comparison plots — multi-tag overlay + cross-game scoreboard |
+| `pr_updater` | Daemon: re-renders progress.png + commits + patches PR body between markers |
+| `current_run` | Daemon: in-flight RUNNING dot driver |
+| `report` | Per-sweep markdown writeup scaffolder |
+| `verdict` | Cross-tag ablation verdict — HELPS / NEUTRAL / REGRESSES + optional PR comment |
+| `gpu_monitor` | GPU util/memory tracker context manager |
 
 ## Releasing — automatic on merge to main
 
