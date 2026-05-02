@@ -52,10 +52,20 @@ jobs:
         run: |
           set +e
           PREVIEW=$(cz bump --dry-run 2>&1)
+          EXIT=$?
           echo "$PREVIEW"
-          if echo "$PREVIEW" | grep -qE "(No commits found|NoCommitsFound)"; then
+          set -e
+          # cz exits 21 with [NO_COMMITS_TO_BUMP] when the commits since the
+          # last tag are all non-bumping types (docs:/chore:/style:/test:/ci:).
+          # Treat that as a clean skip rather than a workflow failure — the
+          # red badge from a docs-only merge is noise, not a real problem.
+          if [ "$EXIT" -eq 21 ] || echo "$PREVIEW" | grep -qE \
+              "(No commits found|NoCommitsFound|NO_COMMITS_TO_BUMP|not eligible to be bumped)"; then
             echo "bump=false" >> "$GITHUB_OUTPUT"
             echo "::notice::No release-worthy commits since last tag — skipping."
+          elif [ "$EXIT" -ne 0 ]; then
+            echo "::error::cz bump --dry-run failed unexpectedly with exit $EXIT"
+            exit "$EXIT"
           else
             VERSION=$(echo "$PREVIEW" | grep -oE 'tag to create: v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/tag to create: v//')
             echo "bump=true" >> "$GITHUB_OUTPUT"
