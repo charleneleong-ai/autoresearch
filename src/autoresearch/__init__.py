@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.0.3"
+__version__ = "0.5.0"
 
 from autoresearch.compare import (
     plot_cross_game_scoreboard,
