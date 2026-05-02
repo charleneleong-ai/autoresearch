@@ -1,3 +1,9 @@
+## v0.7.0 (2026-05-02)
+
+### Feat
+
+- **compare**: multi-metric axes + --from-results-jsonl extract (#15)
+
 ## v0.6.0 (2026-05-02)
 
 ### Feat
