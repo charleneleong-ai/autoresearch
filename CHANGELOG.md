@@ -1,3 +1,9 @@
+## v0.9.0 (2026-05-03)
+
+### Feat
+
+- **retrospective**: wandb-history adapter + gradient_collapse detector (#21)
+
 ## v0.8.0 (2026-05-03)
 
 ### Feat
