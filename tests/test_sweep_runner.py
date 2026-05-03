@@ -559,6 +559,33 @@ def test_kill_with_multi_row_extractor(
     assert all(r["status"] == "EARLY_KILL" for r in rows)
 
 
+@patch("autoresearch.sweep_runner.wait_with_timeout")
+@patch("autoresearch.sweep_runner.subprocess.Popen")
+def test_kill_with_relabel_target_only_marks_target_rows(
+    mock_popen: MagicMock, mock_wait: MagicMock, tmp_path: Path
+) -> None:
+    mock_popen.return_value = _mock_popen()
+    mock_wait.return_value = (-9, "pokemon_red: plateau")
+
+    def multi_game_extract(plan: IterPlan, run_id: str | None, ec: int) -> list[dict]:
+        return [
+            {"score": 0.5, "game": "pokemon_red", "_relabel_target": True},
+            {"score": 0.8, "game": "super_mario"},
+        ]
+
+    runner = _make_runner(
+        tmp_path,
+        plans=[IterPlan(cmd=["run"], description="multi-game")],
+        extractor=FakeExtractor(multi_game_extract),
+    )
+    runner.run()
+
+    rows = load_results(tmp_path, "test")
+    by_game = {r["game"]: r["status"] for r in rows}
+    assert by_game["pokemon_red"] == "EARLY_KILL"
+    assert by_game["super_mario"] == "KEEP"
+
+
 @patch("autoresearch.sweep_runner.wait_with_timeout", return_value=(0, None))
 @patch("autoresearch.sweep_runner.subprocess.Popen")
 def test_best_score_updates_across_iters(
@@ -587,6 +614,93 @@ def test_best_score_updates_across_iters(
 
     # Iter 1 baseline: 0.0 (no history), iter 2: 0.3, iter 3: 0.9.
     assert baselines == [0.0, 0.3, 0.9]
+
+
+@patch("autoresearch.sweep_runner.wait_with_timeout", return_value=(0, None))
+@patch("autoresearch.sweep_runner.subprocess.Popen")
+def test_popen_kwargs_forwarded(
+    mock_popen: MagicMock, mock_wait: MagicMock, tmp_path: Path
+) -> None:
+    mock_popen.return_value = _mock_popen()
+
+    plan = IterPlan(
+        cmd=["echo"],
+        description="iter",
+        popen_kwargs={
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "bufsize": 1,
+        },
+    )
+    runner = _make_runner(tmp_path, plans=[plan])
+    runner.run()
+
+    kwargs = mock_popen.call_args.kwargs
+    assert kwargs["stdout"] == subprocess.PIPE
+    assert kwargs["stderr"] == subprocess.STDOUT
+    assert kwargs["text"] is True
+    assert kwargs["bufsize"] == 1
+
+
+@patch("autoresearch.sweep_runner.wait_with_timeout", return_value=(0, None))
+@patch("autoresearch.sweep_runner.subprocess.Popen")
+def test_prelogged_rows_are_not_duplicated(
+    mock_popen: MagicMock, mock_wait: MagicMock, tmp_path: Path
+) -> None:
+    """Gemma pattern: child process already logged the row. SweepRunner should
+    use the row for bookkeeping but not append a duplicate."""
+    mock_popen.return_value = _mock_popen()
+
+    def extract_prelogged(plan: IterPlan, run_id: str | None, ec: int) -> list[dict]:
+        from autoresearch.results import log_experiment
+
+        log_experiment(
+            experiments_dir=tmp_path,
+            tag="test",
+            config_name="gemma",
+            score=1.0,
+            description="prelogged row",
+            status="KEEP",
+        )
+        row = load_results(tmp_path, "test", "gemma")[-1]
+        row["_prelogged"] = True
+        return [row]
+
+    runner = _make_runner(
+        tmp_path,
+        plans=[IterPlan(cmd=["echo"], description="iter", config_name="gemma")],
+        extractor=FakeExtractor(extract_prelogged),
+    )
+    runner.run()
+
+    rows = load_results(tmp_path, "test", "gemma")
+    assert len(rows) == 1
+    assert rows[0]["description"] == "prelogged row"
+
+
+@patch("autoresearch.sweep_runner.wait_with_timeout", return_value=(0, None))
+@patch("autoresearch.sweep_runner.subprocess.Popen")
+def test_planner_sees_updated_history_between_yields(
+    mock_popen: MagicMock, mock_wait: MagicMock, tmp_path: Path
+) -> None:
+    mock_popen.return_value = _mock_popen()
+
+    class HistoryAwarePlanner:
+        def __init__(self) -> None:
+            self.lengths: list[int] = []
+
+        def plan_iters(self, history: list[dict[str, Any]]) -> Iterator[IterPlan]:
+            self.lengths.append(len(history))
+            yield IterPlan(cmd=["echo", "1"], description="iter 1")
+            self.lengths.append(len(history))
+            yield IterPlan(cmd=["echo", "2"], description="iter 2")
+
+    planner = HistoryAwarePlanner()
+    runner = _make_runner(tmp_path, planner=planner)
+    runner.run()
+
+    assert planner.lengths == [0, 1]
 
 
 if __name__ == "__main__":

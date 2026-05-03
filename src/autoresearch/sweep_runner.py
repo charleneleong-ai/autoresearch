@@ -69,6 +69,8 @@ class IterPlan:
     timeout_min: int | None = None
     env: dict[str, str] | None = None
     cwd: str | Path | None = None
+    popen_kwargs: dict[str, Any] = field(default_factory=dict)
+    sidecar_payload: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -154,6 +156,14 @@ class ResultExtractor(Protocol):
         score, steps, status, description, notes, game,
         config_name, wandb_url, game_score, runtime_min
 
+    Special internal keys:
+      * ``_prelogged=True`` — row already exists in ``results.jsonl``;
+        SweepRunner will use it for relabel / retrospective / return values
+        but will NOT append a duplicate row.
+      * ``_relabel_target=True`` — when a kill happens, only rows marked this
+        way should be relabelled to ``EARLY_KILL``. Useful for multi-row iters
+        where only one logical sub-run triggered the kill.
+
     Any unrecognised keys are passed through as ``extra``.
     """
 
@@ -192,6 +202,8 @@ _RESERVED_FIELDS: frozenset[str] = frozenset(
         "timestamp",
         "tags",
         "extra",
+        "_prelogged",
+        "_relabel_target",
     }
 )
 
@@ -263,8 +275,10 @@ class SweepRunner:
                 blocked = True
                 break
 
-            # Refresh history for the planner's next yield.
-            history = load_results(self.experiments_dir, self.tag)
+            # Refresh history for the planner's next yield without
+            # rebinding the list object — feedback-driven planner generators
+            # may keep a live reference to ``history`` across yields.
+            history[:] = load_results(self.experiments_dir, self.tag)
 
             # Pause between iters (GPU memory release, etc.).
             if self.pause_between_iters_s > 0:
@@ -295,6 +309,7 @@ class SweepRunner:
             "description": plan.description,
             "notes": plan.notes,
             "started_at": datetime.now(tz=UTC).isoformat(),
+            **plan.sidecar_payload,
         }
 
         with sidecar(
@@ -308,6 +323,7 @@ class SweepRunner:
                 plan.cmd,
                 env=popen_env,
                 cwd=plan.cwd,
+                **plan.popen_kwargs,
             )
             run_id = self.triage.setup(plan, proc, best_score)
 
@@ -326,16 +342,27 @@ class SweepRunner:
         # ── extract and log results ───────────────────────────────────
         rows = self.extractor.extract(plan, run_id, exit_code)
         for row in rows:
+            if row.get("_prelogged"):
+                continue
             self._log_row(row, plan)
 
         # ── relabel if killed ─────────────────────────────────────────
         if kill_reason is not None:
             logger.warning("Iter killed: %s", kill_reason)
+            filter_field: str | None = None
+            filter_values: list[str] | None = None
+            relabel_targets = [r for r in rows if r.get("_relabel_target")]
+            target_games = [r.get("game") for r in relabel_targets if r.get("game")]
+            if target_games:
+                filter_field = "game"
+                filter_values = list(dict.fromkeys(str(g) for g in target_games))
             relabel_last_as_early_kill(
                 experiments_dir=self.experiments_dir,
                 tag=self.tag,
                 config_name=plan.config_name,
                 kill_reason=kill_reason,
+                filter_field=filter_field,
+                filter_values=filter_values,
                 last_n=max(len(rows), 1),
             )
 
