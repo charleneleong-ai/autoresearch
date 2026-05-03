@@ -167,29 +167,33 @@ class ResultExtractor(Protocol):
 
 # ── internal helpers ───────────────────────────────────────────────────
 
-_LOG_FIELDS: frozenset[str] = frozenset({
-    "config_name",
-    "game",
-    "score",
-    "steps",
-    "status",
-    "description",
-    "wandb_url",
-    "notes",
-    "game_score",
-    "runtime_min",
-})
+_LOG_FIELDS: frozenset[str] = frozenset(
+    {
+        "config_name",
+        "game",
+        "score",
+        "steps",
+        "status",
+        "description",
+        "wandb_url",
+        "notes",
+        "game_score",
+        "runtime_min",
+    }
+)
 
 # Keys that SweepRunner controls — silently dropped from extractor output
 # so they can't conflict with the runner's own values.
-_RESERVED_FIELDS: frozenset[str] = frozenset({
-    "tag",
-    "experiments_dir",
-    "experiment",
-    "timestamp",
-    "tags",
-    "extra",
-})
+_RESERVED_FIELDS: frozenset[str] = frozenset(
+    {
+        "tag",
+        "experiments_dir",
+        "experiment",
+        "timestamp",
+        "tags",
+        "extra",
+    }
+)
 
 
 # ── SweepRunner ───────────────────────────────────────────────────────
@@ -283,9 +287,7 @@ class SweepRunner:
     def _run_iter(self, plan: IterPlan, best_score: float) -> IterOutcome:
         """Run a single iteration: launch → monitor → log → retrospective."""
         timeout_s = (plan.timeout_min or self.iter_timeout_min) * 60
-        config_rows = load_results(
-            self.experiments_dir, self.tag, plan.config_name
-        )
+        config_rows = load_results(self.experiments_dir, self.tag, plan.config_name)
 
         sidecar_payload = {
             "experiment": len(config_rows),
@@ -314,9 +316,7 @@ class SweepRunner:
                 proc,
                 timeout_s=timeout_s,
                 poll_s=self.triage_poll_s,
-                should_kill=lambda: self.triage.check(
-                    time.monotonic() - launch_time
-                ),
+                should_kill=lambda: self.triage.check(time.monotonic() - launch_time),
             )
             elapsed_s = time.monotonic() - launch_time
             self.triage.teardown()
@@ -382,26 +382,18 @@ class SweepRunner:
             **kwargs,
         )
 
-    def _run_retrospective(
-        self, plan: IterPlan, n_rows: int
-    ) -> list[Finding]:
+    def _run_retrospective(self, plan: IterPlan, n_rows: int) -> list[Finding]:
         """Run detectors on the just-logged rows.  Returns all findings."""
         spec = self.retrospective_spec
         if spec is None or not spec.enabled or n_rows == 0:
             return []
 
-        detectors = [
-            BUILTIN_DETECTORS[n]
-            for n in spec.detectors
-            if n in BUILTIN_DETECTORS
-        ]
+        detectors = [BUILTIN_DETECTORS[n] for n in spec.detectors if n in BUILTIN_DETECTORS]
         if not detectors:
             return []
 
         # Re-read history (includes the just-logged rows).
-        history = load_results(
-            self.experiments_dir, self.tag, plan.config_name
-        )
+        history = load_results(self.experiments_dir, self.tag, plan.config_name)
         logged_rows = history[-n_rows:]
 
         all_findings: list[Finding] = []
@@ -422,9 +414,7 @@ class SweepRunner:
             if row_findings:
                 iter_id = row.get("experiment", "?")
                 md_path = out_dir / f"retrospective_E{iter_id}.md"
-                md_path.write_text(
-                    format_markdown(row_findings, iter_id=iter_id)
-                )
+                md_path.write_text(format_markdown(row_findings, iter_id=iter_id))
 
         return all_findings
 

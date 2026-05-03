@@ -65,9 +65,7 @@ class FakeExtractor:
         self,
         rows_fn: Any | None = None,
     ) -> None:
-        self._fn = rows_fn or (
-            lambda plan, run_id, ec: [{"score": 1.0, "steps": 100}]
-        )
+        self._fn = rows_fn or (lambda plan, run_id, ec: [{"score": 1.0, "steps": 100}])
 
     def extract(
         self,
@@ -179,9 +177,7 @@ def test_triage_kill_relabels_row(
 
 @patch("autoresearch.sweep_runner.wait_with_timeout", return_value=(0, None))
 @patch("autoresearch.sweep_runner.subprocess.Popen")
-def test_per_config_isolation(
-    mock_popen: MagicMock, mock_wait: MagicMock, tmp_path: Path
-) -> None:
+def test_per_config_isolation(mock_popen: MagicMock, mock_wait: MagicMock, tmp_path: Path) -> None:
     """Plans with different config_name write to separate results.jsonl files."""
     mock_popen.return_value = _mock_popen()
 
@@ -343,9 +339,7 @@ def test_evaluation_score_alias(
     runner = _make_runner(
         tmp_path,
         plans=plans,
-        extractor=FakeExtractor(
-            lambda p, r, e: [{"evaluation_score": 0.85}]
-        ),
+        extractor=FakeExtractor(lambda p, r, e: [{"evaluation_score": 0.85}]),
     )
     runner.run()
 
@@ -582,16 +576,12 @@ def test_best_score_updates_across_iters(
 
     scores = iter([0.3, 0.9, 0.5])
 
-    plans = [
-        IterPlan(cmd=["echo"], description=f"iter {i}") for i in range(3)
-    ]
+    plans = [IterPlan(cmd=["echo"], description=f"iter {i}") for i in range(3)]
     runner = _make_runner(
         tmp_path,
         plans=plans,
         triage=TrackingTriage(),
-        extractor=FakeExtractor(
-            lambda p, r, e: [{"score": next(scores)}]
-        ),
+        extractor=FakeExtractor(lambda p, r, e: [{"score": next(scores)}]),
     )
     runner.run()
 
