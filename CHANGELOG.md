@@ -1,3 +1,9 @@
+## v0.8.0 (2026-05-03)
+
+### Feat
+
+- **retrospective**: post-iter failure-mode detector framework (#17)
+
 ## v0.7.0 (2026-05-02)
 
 ### Feat
