@@ -543,6 +543,25 @@ def test_gradient_collapse_silent_on_wandb_api_failure(
     assert BUILTIN_DETECTORS["gradient_collapse"](IterContext(row)) is None
 
 
+def test_gradient_collapse_silent_on_arbitrary_fetch_history_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fetch_history can raise anything (wandb.errors.UsageError when WANDB_API_KEY
+    is unset, ConnectionError when offline, JSONDecodeError on garbled responses).
+    Detector contract: silently skip on any exception, never crash the sweep."""
+    import autoresearch.wandb_history as mod
+
+    class FakeUsageError(Exception):
+        """Stand-in for wandb.errors.UsageError — neither ValueError nor RuntimeError."""
+
+    def boom(*, run_url: str, keys: list[str], samples: int = 500) -> dict:
+        raise FakeUsageError("No API key configured. Use `wandb login` to log in.")
+
+    monkeypatch.setattr(mod, "fetch_history", boom)
+    row = {"experiment": 1, "wandb_url": "charlene/orak/abc"}
+    assert BUILTIN_DETECTORS["gradient_collapse"](IterContext(row)) is None
+
+
 def test_gradient_collapse_silent_when_wandb_extra_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
