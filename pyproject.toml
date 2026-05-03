@@ -50,6 +50,7 @@ autoresearch-render = "autoresearch.render:cli"
 autoresearch-report = "autoresearch.report:app"
 autoresearch-verdict = "autoresearch.verdict:app"
 autoresearch-compare = "autoresearch.compare:cli"
+autoresearch-retrospective = "autoresearch.retrospective:app"
 
 [build-system]
 requires = ["hatchling"]

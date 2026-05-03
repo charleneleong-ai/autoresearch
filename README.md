@@ -66,6 +66,70 @@ autoresearch-render --tag my_sweep                  # flat
 autoresearch-render --tag my_sweep --config gemma   # per-config
 ```
 
+### Post-iter retrospective ([#16](https://github.com/charleneleong-ai/autoresearch/issues/16))
+
+After each iter, run a panel of `FailureDetector`s against the iter's
+artefacts (`results.jsonl` row + per-iter log + optional `*.per_row.jsonl`
+rubric dump). Each detector returns 0 or 1 `Finding`; findings get attached
+to the row + rendered to a sibling markdown file.
+
+```bash
+# After-the-fact audit of a sweep that already finished
+autoresearch-retrospective audit \
+  --results-jsonl experiments/my_sweep/gemma/results.jsonl \
+  --log logs/sweep_20260503.log \
+  --per-row-jsonl experiments/my_sweep/gemma/per_row_E27.jsonl \
+  --iter latest \
+  --write-md experiments/my_sweep/gemma/retrospective_E27.md \
+  --write-json   # appends `retrospective: {findings: [...]}` to the row
+```
+
+```python
+# In-loop integration — call after _finalize_iter() in your project's autoresearch.py
+from autoresearch import (
+    BUILTIN_DETECTORS, audit_iter, attach_findings_to_row, format_markdown,
+)
+
+findings = audit_iter(
+    results_row=row,
+    log_path=Path("logs/sweep.log"),
+    per_row_jsonl_path=Path(f"experiments/{tag}/per_row_E{i}.jsonl"),
+    history=load_results(experiments_dir, tag, config_name),
+    detectors=[BUILTIN_DETECTORS["silent_kill"], BUILTIN_DETECTORS["eval_score_plateau"]],
+)
+attach_findings_to_row(row, findings)
+(out_dir / f"retrospective_E{i}.md").write_text(format_markdown(findings, iter_id=i))
+
+# Use warn-level findings to drive the next iter's notes (self-correcting loop)
+from autoresearch import filter_by_severity
+for f in filter_by_severity(findings, "warn"):
+    next_iter_notes.append(f"⚠ {f.detector}: {f.suggested_action}")
+```
+
+Built-in detectors and their YAML wiring (see `--spec` flag):
+
+```yaml
+# configs/schedules/<sweep>.yaml
+post_iter_retrospective:
+  enabled: true
+  detectors:
+    - silent_kill
+    - triage_threshold_mismatch
+    - eval_score_plateau
+    - bucketed_failure
+  detector_kwargs:
+    triage_threshold_mismatch: { min_first_score_step: 150 }   # task-specific
+    bucketed_failure: { bucket_field: ground_truth_trigger }   # rubric field name
+  on_finding:
+    - { severity: warn,  action: append_to_next_iter_notes }
+    - { severity: block, action: stop_sweep }
+```
+
+Custom detectors (project-specific — e.g. `obs_collision` for game-agent
+sweeps, `gradient_collapse` for RL with wandb history) are added by passing
+your own `FailureDetector` callables to `audit_iter` or by registering them
+into a custom dict and forwarding to `RetrospectiveSpec.selected_detectors`.
+
 ```bash
 # Append a new milestone after each sweep verdict — milestones.yaml is the
 # canonical chronological log of cross-experiment progress. File is created
@@ -128,6 +192,7 @@ Alpha, personal use. Validated against live multi-month sweeps. Current modules 
 | `current_run` | Daemon: in-flight RUNNING dot driver |
 | `report` | Per-sweep markdown writeup scaffolder |
 | `verdict` | Cross-tag ablation verdict — HELPS / NEUTRAL / REGRESSES + optional PR comment |
+| `retrospective` | Post-iter failure-mode audit — pluggable detectors (silent_kill / triage_threshold_mismatch / eval_score_plateau / bucketed_failure) write findings into `results.jsonl` + sibling `retrospective_<iter>.md`. Self-correcting loop: warn-level findings are designed to feed the next iter's notes; block-level should stop the sweep. ([#16](https://github.com/charleneleong-ai/autoresearch/issues/16)) |
 | `gpu_monitor` | GPU util/memory tracker context manager |
 
 ## Releasing — automatic on merge to main
