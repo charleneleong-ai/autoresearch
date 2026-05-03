@@ -424,8 +424,10 @@ def _gradient_collapse(ctx: IterContext) -> Finding | None:
 
     try:
         series = fetch_history(run_url=str(wandb_url), keys=[loss_key, reward_key], samples=samples)
-    except (ValueError, RuntimeError):
-        # Bad URL or API failure — don't crash the sweep, just skip.
+    except Exception:
+        # Bad URL, API failure, missing credentials (wandb.errors.UsageError),
+        # network timeout — anything fetch_history might raise. The detector's
+        # contract is "silently skip if I can't run", not "crash the sweep".
         return None
 
     loss = series.get(loss_key, [])
