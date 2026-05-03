@@ -1,3 +1,9 @@
+## v0.11.0 (2026-05-03)
+
+### Feat
+
+- **sweep-helpers**: bucket-1 — relabel + kill ladder + sidecar (#24)
+
 ## v0.10.0 (2026-05-03)
 
 ### Feat
