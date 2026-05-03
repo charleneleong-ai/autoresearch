@@ -23,6 +23,7 @@ from autoresearch.results import (
 )
 from autoresearch.retrospective import (
     BUILTIN_DETECTORS,
+    BUILTIN_TRANSFORMS,
     FailureDetector,
     Finding,
     IterContext,
@@ -69,6 +70,7 @@ __all__ = [
     "load_spec",
     # retrospective (autoresearch#16)
     "BUILTIN_DETECTORS",
+    "BUILTIN_TRANSFORMS",
     "FailureDetector",
     "Finding",
     "IterContext",

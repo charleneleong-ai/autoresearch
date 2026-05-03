@@ -124,10 +124,15 @@ post_iter_retrospective:
     - eval_score_plateau
     - bucketed_failure
     - gradient_collapse                                          # needs [wandb] extra
+    - sign_flip_in_rubric                                        # alias of value_transform_mismatch
   detector_kwargs:
     triage_threshold_mismatch: { min_first_score_step: 150 }    # task-specific
     bucketed_failure: { bucket_field: ground_truth_trigger }    # rubric field name
     gradient_collapse: { loss_key: train/policy_loss, window: 100 }
+    sign_flip_in_rubric:
+      cited_value_field: cited
+      ground_truth_value_field: truth
+      mismatch_threshold: 0.6
   on_finding:
     - { severity: warn,  action: append_to_next_iter_notes }
     - { severity: block, action: stop_sweep }
@@ -141,6 +146,29 @@ pattern that means the optimizer is stuck. It silently skips when:
 `wandb_url` is absent (project doesn't use wandb), the `[wandb]` extra
 isn't installed, history is shorter than `window`, or the wandb API call
 fails.
+
+`value_transform_mismatch` is the generic form that catches the family of
+"rubric strict-equals on a transformed value" bugs (sign flips, unit
+scaling, sign negation). Pass `transforms: [...]` to opt in:
+
+```yaml
+detectors:
+  - value_transform_mismatch
+detector_kwargs:
+  value_transform_mismatch:
+    transforms: [abs, scale_100, scale_0.01, negate]   # try all four
+    cited_value_field: model_answer
+    ground_truth_value_field: expected_answer
+```
+
+Built-in transforms: `abs` (sign flip), `negate` (sign reversal),
+`scale_100` (decimal → percent: 0.12 → 12), `scale_0.01` (percent →
+decimal: 12 → 0.12). Custom callables are accepted in-process via the
+Python API — pass them directly in the `transforms` list. The
+`sign_flip_in_rubric` alias is `value_transform_mismatch` pre-set with
+`transforms=["abs"]`, matching #19's original spec verbatim — uses its
+own kwargs key (`sign_flip_in_rubric: {...}`) so the alias and generic
+form can be tuned independently in the same YAML.
 
 Custom detectors (project-specific — e.g. `obs_collision` for game-agent
 sweeps with state-jsonl obs ambiguity) are added by passing your own

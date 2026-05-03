@@ -45,7 +45,7 @@ from __future__ import annotations
 import json
 import re
 import statistics
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -491,14 +491,179 @@ def _gradient_collapse(ctx: IterContext) -> Finding | None:
 _gradient_collapse.name = "gradient_collapse"  # type: ignore[attr-defined]
 
 
-# Public registry — users can add their own (e.g. `obs_collision` for game-agent
-# sweeps, `sign_flip_in_rubric` for rubric-based eval sweeps).
+# ── value_transform_mismatch (and its sign_flip_in_rubric alias) ──────
+#
+# Generic "rubric strict-equals on a transformed value" detector. Catches
+# the family of rubric mismatches where the model presents a value through
+# a transform (sign flip, unit scale, sign negation, etc.) that the rubric
+# refuses to invert. The original sign_flip_in_rubric case from #19 is one
+# instance: cited == abs(truth) — model wrote magnitude, truth was signed.
+#
+# Users can extend BUILTIN_TRANSFORMS by passing their own callables in the
+# `transforms` list (works in-process; for YAML schedule blocks, register
+# a name in BUILTIN_TRANSFORMS first).
+
+# Map of name → callable. YAML schedule entries reference these by name.
+BUILTIN_TRANSFORMS: dict[str, Callable[[float], float]] = {
+    "abs": abs,
+    "negate": lambda x: -x,
+    # `scale_100` is for rubrics that store decimals (0.12) but the model writes
+    # percent (12). `scale_0.01` is the inverse — for rubrics that store
+    # percents but the model writes decimals.
+    "scale_100": lambda x: x * 100,
+    "scale_0.01": lambda x: x * 0.01,
+}
+
+
+def _build_value_transform_detector(
+    detector_name: str,
+    default_transforms: list[str] | None,
+) -> FailureDetector:
+    """Factory for the value_transform_mismatch family.
+
+    `value_transform_mismatch` is the generic form: the user must pass
+    `transforms=[...]` in detector_kwargs or the detector is a no-op.
+
+    `sign_flip_in_rubric` is the same logic with `default_transforms=["abs"]`,
+    matching the spec from autoresearch#19. Calling them by either name
+    produces a Finding tagged with that name (so the YAML schedule and
+    results.jsonl entries stay self-documenting).
+    """
+
+    def fn(ctx: IterContext) -> Finding | None:
+        rows = _read_jsonl(ctx.per_row_jsonl_path)
+        if not rows:
+            return None
+
+        kwargs = _detector_kwargs(ctx, detector_name)
+        cited_field = str(kwargs.get("cited_value_field", "cited_value"))
+        truth_field = str(kwargs.get("ground_truth_value_field", "ground_truth_value"))
+        passed_field = str(kwargs.get("passed_field", "passed"))
+        min_pairs = int(kwargs.get("min_value_pairs", 10))
+        threshold = float(kwargs.get("mismatch_threshold", 0.5))
+        epsilon = float(kwargs.get("epsilon", 0.001))
+        transforms_kw = kwargs.get("transforms", default_transforms)
+        if not transforms_kw:
+            return None  # generic detector with no transforms is a no-op
+
+        # Resolve names → callables. Accept callables directly for in-process
+        # use; YAML schedules pass strings.
+        resolved: list[tuple[str, Callable[[float], float]]] = []
+        for t in transforms_kw:
+            if isinstance(t, str):
+                if t not in BUILTIN_TRANSFORMS:
+                    raise KeyError(
+                        f"Unknown transform {t!r}. Built-in: {sorted(BUILTIN_TRANSFORMS)}. "
+                        f"Pass a callable directly to use a custom transform."
+                    )
+                resolved.append((t, BUILTIN_TRANSFORMS[t]))
+            elif callable(t):
+                resolved.append((getattr(t, "__name__", "<custom>"), t))
+            else:
+                raise TypeError(
+                    f"transforms entries must be str (registered name) or callable, "
+                    f"got {type(t).__name__}"
+                )
+
+        # Extract (cited, truth) pairs from FAIL rows where both values are
+        # numeric. Booleans pass `isinstance(_, int)` so explicitly exclude.
+        pairs: list[tuple[float, float]] = []
+        sample_indices: list[int] = []
+        for idx, row in enumerate(rows):
+            if row.get(passed_field) is not False:
+                continue
+            cited = row.get(cited_field)
+            truth = row.get(truth_field)
+            if isinstance(cited, bool) or isinstance(truth, bool):
+                continue
+            if not isinstance(cited, (int, float)) or not isinstance(truth, (int, float)):
+                continue
+            pairs.append((float(cited), float(truth)))
+            sample_indices.append(idx)
+
+        if len(pairs) < min_pairs:
+            return None
+
+        def matches(cited: float, transformed: float) -> bool:
+            # Relative tolerance with a 1e-9 absolute floor for values near zero.
+            return abs(cited - transformed) <= max(abs(transformed) * epsilon, 1e-9)
+
+        # Per-transform match counts.
+        per_transform: list[tuple[str, int, list[int]]] = []
+        for tname, tfn in resolved:
+            count = 0
+            matched_indices: list[int] = []
+            for (cited, truth), idx in zip(pairs, sample_indices, strict=False):
+                try:
+                    transformed = tfn(truth)
+                except Exception:
+                    continue
+                if matches(cited, transformed):
+                    count += 1
+                    matched_indices.append(idx)
+            per_transform.append((tname, count, matched_indices))
+
+        best_name, best_count, best_indices = max(per_transform, key=lambda r: r[1])
+        fraction = best_count / len(pairs)
+        if fraction < threshold:
+            return None
+
+        iter_id = ctx.results_row.get("experiment", "?")
+        sample = best_indices[:8]
+        all_transforms_md = "".join(
+            f"* `{t}`: {c}/{len(pairs)} ({c / len(pairs):.1%})\n"
+            for t, c, _ in sorted(per_transform, key=lambda r: -r[1])
+        )
+        return Finding(
+            detector=detector_name,
+            severity="warn",
+            summary=(
+                f"E{iter_id}: {fraction:.1%} of failures ({best_count}/{len(pairs)}) "
+                f"match {best_name}({truth_field}) — rubric should accept the "
+                f"{best_name} variant."
+            ),
+            detail=(
+                f"### {detector_name} (warn)\n\n"
+                f"Across {len(pairs)} fail rows where both `{cited_field}` and "
+                f"`{truth_field}` are numeric:\n\n"
+                f"* **{best_name} match rate: {best_count}/{len(pairs)} "
+                f"({fraction:.1%})** (threshold ≥ {threshold:.0%})\n\n"
+                f"All transforms tried:\n"
+                f"{all_transforms_md}\n"
+                f"Sample matched rows: {', '.join(f'i={i}' for i in sample)} …\n\n"
+                f"The rubric is currently strict-equal on `{truth_field}` but the "
+                f"model is presenting the value through a `{best_name}` transform. "
+                f"Either relax the rubric to accept the transformed form, or fix "
+                f"the prompt to produce raw values."
+            ),
+            suggested_action=(
+                f"Extend rubric to accept `{best_name}({truth_field})` as a valid "
+                f"match for `{cited_field}`."
+            ),
+        )
+
+    fn.name = detector_name  # type: ignore[attr-defined]
+    return fn
+
+
+_value_transform_mismatch = _build_value_transform_detector(
+    "value_transform_mismatch", default_transforms=None
+)
+_sign_flip_in_rubric = _build_value_transform_detector(
+    "sign_flip_in_rubric", default_transforms=["abs"]
+)
+
+
+# Public registry — users can add their own (e.g. `obs_collision` for game-
+# agent sweeps with state-jsonl obs ambiguity).
 BUILTIN_DETECTORS: dict[str, FailureDetector] = {
     _silent_kill.name: _silent_kill,
     _triage_threshold_mismatch.name: _triage_threshold_mismatch,
     _eval_score_plateau.name: _eval_score_plateau,
     _bucketed_failure.name: _bucketed_failure,
     _gradient_collapse.name: _gradient_collapse,
+    _value_transform_mismatch.name: _value_transform_mismatch,
+    _sign_flip_in_rubric.name: _sign_flip_in_rubric,
 }
 
 

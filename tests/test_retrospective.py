@@ -594,5 +594,241 @@ def test_gradient_collapse_in_registry() -> None:
     assert BUILTIN_DETECTORS["gradient_collapse"].name == "gradient_collapse"
 
 
+# ── value_transform_mismatch + sign_flip_in_rubric alias ───────────────
+
+
+def _write_value_pairs(tmp_path: Path, pairs: list[tuple[float, float]]) -> Path:
+    """Helper: write a per_row JSONL with cited_value + ground_truth_value cols.
+    All rows are marked passed=False (the detector only inspects fail rows)."""
+    rows = [
+        {"passed": False, "cited_value": cited, "ground_truth_value": truth}
+        for cited, truth in pairs
+    ]
+    p = tmp_path / "per_row.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    return p
+
+
+def test_value_transform_mismatch_no_op_without_explicit_transforms(tmp_path: Path) -> None:
+    """The generic detector defaults to no-op so that wiring it into a YAML
+    schedule without any transforms doesn't accidentally fire."""
+    p = _write_value_pairs(tmp_path, [(12, -12)] * 20)  # all flipped — would fire if transforms set
+    cur = {"experiment": 1}
+    assert (
+        BUILTIN_DETECTORS["value_transform_mismatch"](IterContext(cur, per_row_jsonl_path=p))
+        is None
+    )
+
+
+def test_value_transform_mismatch_fires_with_abs_transform(tmp_path: Path) -> None:
+    p = _write_value_pairs(tmp_path, [(12, -12)] * 20)
+    ctx = IterContext(
+        {"experiment": 7},
+        per_row_jsonl_path=p,
+        detector_kwargs={"value_transform_mismatch": {"transforms": ["abs"]}},
+    )
+    finding = BUILTIN_DETECTORS["value_transform_mismatch"](ctx)
+    assert finding is not None
+    assert finding.severity == "warn"
+    assert finding.detector == "value_transform_mismatch"
+    assert "E7" in finding.summary
+    assert "abs" in finding.summary
+    assert "100.0%" in finding.summary  # 20/20 matched
+
+
+def test_value_transform_picks_best_match_among_multiple(tmp_path: Path) -> None:
+    """When several transforms are tested, the highest-match one is reported."""
+    # 15 pairs match abs(truth), 5 match scale_100(truth), 0 match negate
+    pairs = [(12, -12)] * 15 + [(50, 0.5)] * 5
+    p = _write_value_pairs(tmp_path, pairs)
+    ctx = IterContext(
+        {"experiment": 1},
+        per_row_jsonl_path=p,
+        detector_kwargs={
+            "value_transform_mismatch": {
+                "transforms": ["abs", "scale_100", "negate"],
+            }
+        },
+    )
+    finding = BUILTIN_DETECTORS["value_transform_mismatch"](ctx)
+    assert finding is not None
+    assert "abs" in finding.summary
+    # All-transforms breakdown lives in detail
+    assert "abs`: 15/20" in finding.detail
+    assert "scale_100`: 5/20" in finding.detail
+
+
+def test_value_transform_silent_when_below_threshold(tmp_path: Path) -> None:
+    # 4 sign-flips out of 20 — well under default 50% threshold
+    pairs = [(12, -12)] * 4 + [(7, 99)] * 16
+    p = _write_value_pairs(tmp_path, pairs)
+    ctx = IterContext(
+        {"experiment": 1},
+        per_row_jsonl_path=p,
+        detector_kwargs={"value_transform_mismatch": {"transforms": ["abs"]}},
+    )
+    assert BUILTIN_DETECTORS["value_transform_mismatch"](ctx) is None
+
+
+def test_value_transform_silent_when_below_min_pairs(tmp_path: Path) -> None:
+    p = _write_value_pairs(tmp_path, [(12, -12)] * 5)  # only 5 < default min_value_pairs=10
+    ctx = IterContext(
+        {"experiment": 1},
+        per_row_jsonl_path=p,
+        detector_kwargs={"value_transform_mismatch": {"transforms": ["abs"]}},
+    )
+    assert BUILTIN_DETECTORS["value_transform_mismatch"](ctx) is None
+
+
+def test_value_transform_respects_custom_thresholds(tmp_path: Path) -> None:
+    # 6 matches in 10 = 60% — fires at default 50% threshold...
+    pairs = [(12, -12)] * 6 + [(7, 99)] * 4
+    p = _write_value_pairs(tmp_path, pairs)
+    ctx_default = IterContext(
+        {"experiment": 1},
+        per_row_jsonl_path=p,
+        detector_kwargs={"value_transform_mismatch": {"transforms": ["abs"]}},
+    )
+    assert BUILTIN_DETECTORS["value_transform_mismatch"](ctx_default) is not None
+    # ...but not at 75%
+    ctx_strict = IterContext(
+        {"experiment": 1},
+        per_row_jsonl_path=p,
+        detector_kwargs={
+            "value_transform_mismatch": {"transforms": ["abs"], "mismatch_threshold": 0.75}
+        },
+    )
+    assert BUILTIN_DETECTORS["value_transform_mismatch"](ctx_strict) is None
+
+
+def test_value_transform_respects_custom_field_names(tmp_path: Path) -> None:
+    rows = [{"passed": False, "model_answer": 12, "expected_answer": -12} for _ in range(20)]
+    p = tmp_path / "per_row.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    ctx = IterContext(
+        {"experiment": 1},
+        per_row_jsonl_path=p,
+        detector_kwargs={
+            "value_transform_mismatch": {
+                "transforms": ["abs"],
+                "cited_value_field": "model_answer",
+                "ground_truth_value_field": "expected_answer",
+            }
+        },
+    )
+    finding = BUILTIN_DETECTORS["value_transform_mismatch"](ctx)
+    assert finding is not None
+    assert "expected_answer" in finding.summary  # custom field name echoes back
+
+
+def test_value_transform_accepts_custom_callable(tmp_path: Path) -> None:
+    """Non-string entries in the transforms list are treated as direct callables."""
+    # Pairs where cited == truth + 1 (a transform not in BUILTIN_TRANSFORMS)
+    pairs = [(13, 12)] * 20
+    p = _write_value_pairs(tmp_path, pairs)
+    ctx = IterContext(
+        {"experiment": 1},
+        per_row_jsonl_path=p,
+        detector_kwargs={
+            "value_transform_mismatch": {"transforms": [lambda x: x + 1]},
+        },
+    )
+    finding = BUILTIN_DETECTORS["value_transform_mismatch"](ctx)
+    assert finding is not None
+
+
+def test_value_transform_unknown_string_name_raises(tmp_path: Path) -> None:
+    p = _write_value_pairs(tmp_path, [(12, -12)] * 20)
+    ctx = IterContext(
+        {"experiment": 1},
+        per_row_jsonl_path=p,
+        detector_kwargs={"value_transform_mismatch": {"transforms": ["square_root_of_minus_one"]}},
+    )
+    with pytest.raises(KeyError, match="Unknown transform"):
+        BUILTIN_DETECTORS["value_transform_mismatch"](ctx)
+
+
+def test_value_transform_excludes_bools(tmp_path: Path) -> None:
+    """isinstance(True, int) is True in Python — exclude bools so passed=True/False
+    fields don't accidentally count as numeric pairs."""
+    rows = [{"passed": False, "cited_value": True, "ground_truth_value": False} for _ in range(20)]
+    p = tmp_path / "per_row.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    ctx = IterContext(
+        {"experiment": 1},
+        per_row_jsonl_path=p,
+        detector_kwargs={"value_transform_mismatch": {"transforms": ["abs"]}},
+    )
+    # Bools excluded → 0 pairs → below min_value_pairs → silent
+    assert BUILTIN_DETECTORS["value_transform_mismatch"](ctx) is None
+
+
+def test_value_transform_silent_when_no_per_row_file() -> None:
+    assert BUILTIN_DETECTORS["value_transform_mismatch"](IterContext({"experiment": 1})) is None
+
+
+def test_value_transform_handles_all_transforms_in_builtin_set(tmp_path: Path) -> None:
+    """Sanity: each named builtin transform actually fires on a tailored input."""
+    cases = {
+        "abs": (12, -12),
+        "negate": (12, -12),  # negate also matches the sign-flip case
+        "scale_100": (12, 0.12),
+        "scale_0.01": (0.12, 12),
+    }
+    for name, (cited, truth) in cases.items():
+        p = _write_value_pairs(tmp_path, [(cited, truth)] * 20)
+        ctx = IterContext(
+            {"experiment": 1},
+            per_row_jsonl_path=p,
+            detector_kwargs={"value_transform_mismatch": {"transforms": [name]}},
+        )
+        finding = BUILTIN_DETECTORS["value_transform_mismatch"](ctx)
+        assert finding is not None, f"transform {name!r} did not fire on its own case"
+        assert name in finding.summary
+
+
+# ── sign_flip_in_rubric alias ─────────────────────────────────────────
+
+
+def test_sign_flip_in_rubric_fires_without_explicit_kwargs(tmp_path: Path) -> None:
+    """The alias is the whole point — works with no detector_kwargs at all,
+    because default_transforms=['abs'] is baked in by the factory."""
+    p = _write_value_pairs(tmp_path, [(12, -12)] * 20)
+    finding = BUILTIN_DETECTORS["sign_flip_in_rubric"](
+        IterContext({"experiment": 5}, per_row_jsonl_path=p)
+    )
+    assert finding is not None
+    assert finding.detector == "sign_flip_in_rubric"  # not value_transform_mismatch
+    assert "abs" in finding.summary
+
+
+def test_sign_flip_in_rubric_kwargs_use_alias_name(tmp_path: Path) -> None:
+    """detector_kwargs are looked up under the alias's name, not the underlying
+    factory's. So sign_flip_in_rubric reads kwargs["sign_flip_in_rubric"]."""
+    p = _write_value_pairs(tmp_path, [(12, -12)] * 4 + [(7, 99)] * 6)  # 4/10 = 40%
+    # Default 50% threshold → silent. Override under the alias's key only.
+    ctx_silent = IterContext({"experiment": 5}, per_row_jsonl_path=p)
+    assert BUILTIN_DETECTORS["sign_flip_in_rubric"](ctx_silent) is None
+    ctx_loose = IterContext(
+        {"experiment": 5},
+        per_row_jsonl_path=p,
+        detector_kwargs={"sign_flip_in_rubric": {"mismatch_threshold": 0.3}},
+    )
+    assert BUILTIN_DETECTORS["sign_flip_in_rubric"](ctx_loose) is not None
+
+
+def test_value_transform_and_sign_flip_are_distinct_detectors() -> None:
+    """Two registered names, two distinct callables, two distinct .name attrs."""
+    vt = BUILTIN_DETECTORS["value_transform_mismatch"]
+    sf = BUILTIN_DETECTORS["sign_flip_in_rubric"]
+    assert vt is not sf
+    assert vt.name != sf.name
+
+
+def test_value_transform_in_registry() -> None:
+    assert "value_transform_mismatch" in BUILTIN_DETECTORS
+    assert "sign_flip_in_rubric" in BUILTIN_DETECTORS
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
