@@ -46,6 +46,15 @@ from autoresearch.subprocess_utils import (
     kill_gracefully,
     wait_with_timeout,
 )
+from autoresearch.sweep_runner import (
+    IterOutcome,
+    IterPlan,
+    IterPlanner,
+    ResultExtractor,
+    SweepResult,
+    SweepRunner,
+    TriageMonitor,
+)
 from autoresearch.verdict import (
     GameSpec,
     GameVerdict,
@@ -63,6 +72,14 @@ __all__ = [
     "log_experiment",
     "relabel_last_as_early_kill",
     "tag_dir",
+    # sweep runner (autoresearch#20 PR 2)
+    "IterOutcome",
+    "IterPlan",
+    "IterPlanner",
+    "ResultExtractor",
+    "SweepResult",
+    "SweepRunner",
+    "TriageMonitor",
     # sweep-loop helpers (autoresearch#20 PR 1)
     "clear_sidecar",
     "kill_gracefully",
