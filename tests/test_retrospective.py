@@ -214,9 +214,7 @@ def test_bucketed_failure_silent_when_failures_below_min(tmp_path: Path) -> None
     rows = [{"passed": False, "ground_truth_bucket": "X"} for _ in range(3)]
     p = _write_per_row(tmp_path, rows)
     # Default min_failures=5 → does not fire on 3
-    assert (
-        BUILTIN_DETECTORS["bucketed_failure"](IterContext({}, per_row_jsonl_path=p)) is None
-    )
+    assert BUILTIN_DETECTORS["bucketed_failure"](IterContext({}, per_row_jsonl_path=p)) is None
 
 
 def test_bucketed_failure_silent_when_distribution_is_spread(tmp_path: Path) -> None:
@@ -224,9 +222,7 @@ def test_bucketed_failure_silent_when_distribution_is_spread(tmp_path: Path) -> 
         {"passed": False, "ground_truth_bucket": f"B{i % 5}"} for i in range(20)
     ]  # 4 fails per bucket × 5 buckets — no concentration
     p = _write_per_row(tmp_path, rows)
-    assert (
-        BUILTIN_DETECTORS["bucketed_failure"](IterContext({}, per_row_jsonl_path=p)) is None
-    )
+    assert BUILTIN_DETECTORS["bucketed_failure"](IterContext({}, per_row_jsonl_path=p)) is None
 
 
 def test_bucketed_failure_respects_custom_bucket_field(tmp_path: Path) -> None:
@@ -397,9 +393,7 @@ def test_cli_audit_writes_md_and_updates_jsonl(runner: CliRunner, tmp_path: Path
     log = tmp_path / "sweep.log"
     log.write_text("score plateau (0.00%) for 80 steps\n")
     results = tmp_path / "results.jsonl"
-    results.write_text(
-        json.dumps({"experiment": 0, "status": "EARLY_KILL", "steps": 80}) + "\n"
-    )
+    results.write_text(json.dumps({"experiment": 0, "status": "EARLY_KILL", "steps": 80}) + "\n")
     md_out = tmp_path / "out" / "retrospective.md"
 
     result = runner.invoke(
