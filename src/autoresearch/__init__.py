@@ -21,6 +21,20 @@ from autoresearch.results import (
     log_experiment,
     tag_dir,
 )
+from autoresearch.retrospective import (
+    BUILTIN_DETECTORS,
+    FailureDetector,
+    Finding,
+    IterContext,
+    RetrospectiveSpec,
+    Severity,
+    attach_findings_to_row,
+    audit_iter,
+    filter_by_severity,
+)
+from autoresearch.retrospective import (
+    load_spec as load_retrospective_spec,
+)
 from autoresearch.verdict import (
     GameSpec,
     GameVerdict,
@@ -53,4 +67,15 @@ __all__ = [
     "compute_verdict",
     "format_markdown",
     "load_spec",
+    # retrospective (autoresearch#16)
+    "BUILTIN_DETECTORS",
+    "FailureDetector",
+    "Finding",
+    "IterContext",
+    "RetrospectiveSpec",
+    "Severity",
+    "attach_findings_to_row",
+    "audit_iter",
+    "filter_by_severity",
+    "load_retrospective_spec",
 ]
