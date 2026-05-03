@@ -1,3 +1,9 @@
+## v0.10.0 (2026-05-03)
+
+### Feat
+
+- **retrospective**: value_transform_mismatch + sign_flip_in_rubric alias (#23)
+
 ## v0.9.1 (2026-05-03)
 
 ### Fix
