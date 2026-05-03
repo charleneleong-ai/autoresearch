@@ -1,3 +1,9 @@
+## v0.12.0 (2026-05-03)
+
+### Feat
+
+- **loop**: in-package SweepRunner with three Protocols (#25)
+
 ## v0.11.0 (2026-05-03)
 
 ### Feat
