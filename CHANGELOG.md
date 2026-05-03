@@ -1,3 +1,9 @@
+## v0.9.1 (2026-05-03)
+
+### Fix
+
+- **retrospective**: broaden gradient_collapse exception handler (#22)
+
 ## v0.9.0 (2026-05-03)
 
 ### Feat
