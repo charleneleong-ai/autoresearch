@@ -31,6 +31,11 @@ dependencies = [
 
 [project.optional-dependencies]
 pr = ["requests>=2.31"]
+# `[wandb]` extra: enables the `gradient_collapse` retrospective detector
+# (and any future detectors that need to read training-time series). Lazy-
+# imported in autoresearch.wandb_history; without the extra, the detector
+# silently no-ops instead of crashing.
+wandb = ["wandb>=0.17"]
 dev = [
     "pytest>=8",
     "ruff>=0.6",

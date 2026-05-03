@@ -378,13 +378,125 @@ def _bucketed_failure(ctx: IterContext) -> Finding | None:
 _bucketed_failure.name = "bucketed_failure"  # type: ignore[attr-defined]
 
 
+def _gradient_collapse(ctx: IterContext) -> Finding | None:
+    """RL/RLVR sweep: train/loss → 0 AND train/reward flat → optimizer stuck.
+
+    Reads the iter's wandb history for ``loss_key`` and ``reward_key``, then
+    fires when both:
+
+    * ``mean(loss[-window:]) < loss_near_zero_threshold`` (loss collapsed), AND
+    * ``stddev(reward[-window:]) / |mean(reward[-window:])| < flat_cv_threshold``
+      (reward isn't moving — gradient signal is dead)
+
+    Silently skips when:
+
+    * ``wandb_url`` isn't in the row (project doesn't use wandb),
+    * the ``[wandb]`` extra isn't installed (lazy ImportError → None),
+    * either series is missing or has fewer than ``window`` samples,
+    * the wandb API call fails (logged via the exception, but not a finding).
+
+    Detector params (under ``detector_kwargs["gradient_collapse"]``):
+
+    * ``loss_key`` (str, default ``"train/loss"``)
+    * ``reward_key`` (str, default ``"train/reward"``)
+    * ``window`` (int, default 50) — how many recent samples define "recent"
+    * ``loss_near_zero_threshold`` (float, default 0.05)
+    * ``flat_cv_threshold`` (float, default 0.02) — coefficient-of-variation
+      below which the reward series counts as "flat"
+    * ``samples`` (int, default 500) — passed through to wandb history sub-sampling
+    """
+    wandb_url = ctx.results_row.get("wandb_url")
+    if not wandb_url:
+        return None
+
+    try:
+        from autoresearch.wandb_history import fetch_history
+    except ImportError:
+        return None  # [wandb] extra not installed — no-op gracefully
+
+    kwargs = _detector_kwargs(ctx, _gradient_collapse.name)
+    loss_key = str(kwargs.get("loss_key", "train/loss"))
+    reward_key = str(kwargs.get("reward_key", "train/reward"))
+    window = int(kwargs.get("window", 50))
+    loss_zero = float(kwargs.get("loss_near_zero_threshold", 0.05))
+    flat_cv = float(kwargs.get("flat_cv_threshold", 0.02))
+    samples = int(kwargs.get("samples", 500))
+
+    try:
+        series = fetch_history(run_url=str(wandb_url), keys=[loss_key, reward_key], samples=samples)
+    except (ValueError, RuntimeError):
+        # Bad URL or API failure — don't crash the sweep, just skip.
+        return None
+
+    loss = series.get(loss_key, [])
+    reward = series.get(reward_key, [])
+    if len(loss) < window or len(reward) < window:
+        return None
+
+    recent_loss = loss[-window:]
+    recent_reward = reward[-window:]
+    mean_loss = sum(recent_loss) / window
+    mean_reward = sum(recent_reward) / window
+
+    if mean_loss >= loss_zero:
+        return None
+
+    if abs(mean_reward) < 1e-9:
+        # Reward effectively zero throughout — CV is undefined but the symptom
+        # (no signal) is exactly what we're catching. Treat as "flat".
+        flat = True
+        cv = float("inf")
+    else:
+        var = sum((r - mean_reward) ** 2 for r in recent_reward) / window
+        std = var**0.5
+        cv = std / abs(mean_reward)
+        flat = cv < flat_cv
+
+    if not flat:
+        return None
+
+    iter_id = ctx.results_row.get("experiment", "?")
+    return Finding(
+        detector=_gradient_collapse.name,
+        severity="block",
+        summary=(
+            f"E{iter_id}: {loss_key} mean={mean_loss:.4f} (< {loss_zero}) and "
+            f"{reward_key} CV={cv:.4f} (< {flat_cv}) over last {window} steps "
+            f"— optimizer appears collapsed."
+        ),
+        detail=(
+            f"### gradient_collapse (block)\n\n"
+            f"Iter `E{iter_id}` shows the joint pattern that indicates a stuck "
+            f"optimizer:\n\n"
+            f"* `{loss_key}` mean over last {window} samples = **{mean_loss:.6f}** "
+            f"(threshold < {loss_zero})\n"
+            f"* `{reward_key}` mean = **{mean_reward:.6f}**, "
+            f"stddev/|mean| = **{cv:.6f}** (threshold < {flat_cv})\n\n"
+            f"Loss has collapsed near zero while reward isn't moving — "
+            f"gradients are no longer driving learning. Check (in order): "
+            f"learning-rate schedule (collapsed too far?), gradient clipping "
+            f"(over-aggressive?), KL coefficient (β too high?), reward scale "
+            f"(numerical underflow?). Sweep should stop until the optimizer "
+            f"is unstuck."
+        ),
+        suggested_action=(
+            "Inspect LR / grad-clip / KL coefficient / reward scale; the "
+            "optimizer is no longer learning. Recommend stopping the sweep."
+        ),
+    )
+
+
+_gradient_collapse.name = "gradient_collapse"  # type: ignore[attr-defined]
+
+
 # Public registry — users can add their own (e.g. `obs_collision` for game-agent
-# sweeps, `gradient_collapse` for RL sweeps with wandb history available).
+# sweeps, `sign_flip_in_rubric` for rubric-based eval sweeps).
 BUILTIN_DETECTORS: dict[str, FailureDetector] = {
     _silent_kill.name: _silent_kill,
     _triage_threshold_mismatch.name: _triage_threshold_mismatch,
     _eval_score_plateau.name: _eval_score_plateau,
     _bucketed_failure.name: _bucketed_failure,
+    _gradient_collapse.name: _gradient_collapse,
 }
 
 
