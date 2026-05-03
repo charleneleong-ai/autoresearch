@@ -135,3 +135,77 @@ def log_experiment(
     with open(results_file, "a") as f:
         f.write(json.dumps(entry) + "\n")
     return results_file
+
+
+def relabel_last_as_early_kill(
+    *,
+    experiments_dir: str | Path = "experiments",
+    tag: str | None = None,
+    config_name: str | None = None,
+    kill_reason: str,
+    filter_field: str | None = None,
+    filter_values: list[str] | tuple[str, ...] | None = None,
+    last_n: int = 1,
+) -> int:
+    """Relabel the most recently appended row(s) as ``status="EARLY_KILL"``.
+
+    Two project-side patterns this covers, both nearly verbatim duplicates
+    in orak-2025-starter-kit and gemma4-rlvr's ``experiments/autoresearch.py``:
+
+    * **Single-row relabel** (gemma4-rlvr): one iter writes one row; on kill,
+      patch that one row. ``relabel_last_as_early_kill(tag=..., kill_reason=...)``.
+    * **Filtered multi-row relabel** (orak): one iter writes one row *per game*
+      (multiple rows per iter); on kill, only patch the offender game's row, not
+      the bystanders. ``relabel_last_as_early_kill(tag=..., kill_reason=...,
+      filter_field="game", filter_values=["pokemon_red"], last_n=N_games)``.
+
+    Parameters
+    ----------
+    experiments_dir, tag, config_name
+        Resolves to the same `results.jsonl` `log_experiment` writes to.
+    kill_reason
+        Free-form string. Stored as ``"KILLED: <reason>. "`` prepended to ``notes``.
+    filter_field, filter_values
+        If both set, restrict patching to rows whose ``filter_field`` value is
+        in ``filter_values``. Useful when an iter writes multiple rows
+        (e.g. one per game) and only some should be marked killed.
+    last_n
+        Inspect the last ``last_n`` rows of the JSONL. Defaults to 1
+        (single-row case).
+
+    Returns
+    -------
+    int
+        Number of rows actually relabelled (0 if file missing, nothing matched,
+        or no rows in the file).
+
+    Notes
+    -----
+    Idempotent — re-running with the same ``kill_reason`` will keep prepending
+    "KILLED: ..." prefixes. Callers that retry should de-dupe on their side.
+    """
+    results_file = tag_dir(experiments_dir, tag, config_name) / "results.jsonl"
+    if not results_file.exists():
+        return 0
+    lines = [ln for ln in results_file.read_text().splitlines() if ln.strip()]
+    if not lines:
+        return 0
+
+    # Window of candidate row indices (most recent first).
+    candidate_indices = list(range(max(0, len(lines) - last_n), len(lines)))
+    patched = 0
+    for idx in candidate_indices:
+        try:
+            entry = json.loads(lines[idx])
+        except json.JSONDecodeError:
+            continue
+        if filter_field is not None and filter_values is not None:
+            if entry.get(filter_field) not in filter_values:
+                continue
+        entry["status"] = "EARLY_KILL"
+        entry["notes"] = f"KILLED: {kill_reason}. " + str(entry.get("notes", ""))
+        lines[idx] = json.dumps(entry)
+        patched += 1
+    if patched:
+        results_file.write_text("\n".join(lines) + "\n")
+    return patched

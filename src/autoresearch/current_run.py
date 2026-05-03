@@ -35,7 +35,10 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich import print as rprint
@@ -163,6 +166,94 @@ def cli() -> None:
     """Entry-point wrapper so the console script (`autoresearch-current-run`)
     runs `main` through typer's argument parser."""
     typer.run(main)
+
+
+# ── In-loop sidecar writer (alternative to the log-watcher daemon above) ───
+#
+# The functions below let a sweep loop write/clear the `current_run.json`
+# sidecar directly at known transition points (iter start / iter end /
+# crash). They're the per-project equivalent of orak's `_write_sidecar` /
+# `_clear_sidecar` helpers, extracted into the package.
+#
+# Use these instead of the log-watcher daemon when:
+#   - The loop already knows what iter it's on (no need to infer from logs)
+#   - You want guaranteed cleanup (the context manager handles unlink-on-exit)
+#   - You don't want to run a separate daemon process
+#
+# Both writers produce the same JSON shape so chart renderers see a
+# consistent payload either way.
+
+
+def write_sidecar(
+    payload: dict[str, Any],
+    *,
+    tag: str | None = None,
+    config_name: str | None = None,
+    experiments_dir: str | Path = "experiments",
+) -> Path:
+    """Write ``payload`` to ``experiments/<tag>[/<config_name>]/current_run.json``.
+
+    Free-form payload — pass whatever fields your chart renderer expects.
+    Common keys (used by both downstream consumers and the daemon above):
+    ``experiment``, ``config_name``, ``description``, ``notes``,
+    ``started_at``, ``log_path``, ``iter_marker``, ``wandb_url``.
+
+    Returns the path written.
+    """
+    sidecar = tag_dir(experiments_dir, tag, config_name) / "current_run.json"
+    sidecar.write_text(json.dumps(payload, indent=2))
+    return sidecar
+
+
+def clear_sidecar(
+    *,
+    tag: str | None = None,
+    config_name: str | None = None,
+    experiments_dir: str | Path = "experiments",
+) -> bool:
+    """Remove the sidecar if present. Returns True if a file was actually unlinked."""
+    sidecar = tag_dir(experiments_dir, tag, config_name) / "current_run.json"
+    if sidecar.exists():
+        sidecar.unlink()
+        return True
+    return False
+
+
+@contextmanager
+def sidecar(
+    payload: dict[str, Any],
+    *,
+    tag: str | None = None,
+    config_name: str | None = None,
+    experiments_dir: str | Path = "experiments",
+) -> Iterator[Path]:
+    """Write the sidecar on enter, unlink on exit (success OR exception).
+
+    The intended in-loop usage:
+
+        for plan in planner.plan_iters(history):
+            with sidecar(
+                {"experiment": i, "description": plan.description, ...},
+                tag=tag, config_name=plan.config_name,
+            ):
+                proc = subprocess.Popen(plan.cmd, ...)
+                ret, kill_reason = wait_with_timeout(proc, timeout_s=...)
+            # sidecar unlinked here regardless of how the iter ended
+
+    Without the context manager, projects routinely forget to clean up after
+    KeyboardInterrupt or a crash mid-iter; stale sidecars then poison the
+    chart's "RUNNING dot" indicator until manually deleted.
+    """
+    path = write_sidecar(
+        payload,
+        tag=tag,
+        config_name=config_name,
+        experiments_dir=experiments_dir,
+    )
+    try:
+        yield path
+    finally:
+        clear_sidecar(tag=tag, config_name=config_name, experiments_dir=experiments_dir)
 
 
 if __name__ == "__main__":

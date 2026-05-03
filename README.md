@@ -239,6 +239,8 @@ Alpha, personal use. Validated against live multi-month sweeps. Current modules 
 | `verdict` | Cross-tag ablation verdict — HELPS / NEUTRAL / REGRESSES + optional PR comment |
 | `retrospective` | Post-iter failure-mode audit — pluggable detectors (silent_kill / triage_threshold_mismatch / eval_score_plateau / bucketed_failure / gradient_collapse) write findings into `results.jsonl` + sibling `retrospective_<iter>.md`. Self-correcting loop: warn-level findings are designed to feed the next iter's notes; block-level should stop the sweep. ([#16](https://github.com/charleneleong-ai/autoresearch/issues/16), [#18](https://github.com/charleneleong-ai/autoresearch/issues/18)) |
 | `wandb_history` | Thin adapter: `fetch_history(run_url, keys, samples)` → `dict[str, list[float]]`. Lazy wandb import behind the `[wandb]` extra; powers `gradient_collapse` and any future detectors that read training-time series |
+| `subprocess_utils` | `kill_gracefully(proc)` (SIGINT → SIGTERM → SIGKILL escalation ladder with grace windows) + `wait_with_timeout(proc, timeout_s, should_kill=...)` (poll-and-kill helper for iter loops). Extracted from duplicated boilerplate in orak / gemma4-rlvr's `experiments/autoresearch.py`. ([#20](https://github.com/charleneleong-ai/autoresearch/issues/20)) |
+| `current_run` | Daemon (`autoresearch-current-run`) that tails sweep logs to maintain `current_run.json` for the chart's RUNNING dot. Also exposes `write_sidecar` / `clear_sidecar` / `sidecar` context manager for in-loop callers that already know the iter state and don't need a separate daemon process. |
 | `gpu_monitor` | GPU util/memory tracker context manager |
 
 ## Releasing — automatic on merge to main
