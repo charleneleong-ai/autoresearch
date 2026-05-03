@@ -23,9 +23,15 @@ Self-driving experiment sweep loop — daemon-detached `autoresearch.py` + live 
 For consumers (downstream projects depending on this package):
 
 ```bash
-uv add autoresearch                   # once published; until then:
-uv pip install git+https://github.com/charleneleong-ai/autoresearch.git
+uv add autoresearch                            # core only
+uv add 'autoresearch[wandb]'                   # + gradient_collapse detector (wandb history)
+uv pip install git+https://github.com/charleneleong-ai/autoresearch.git           # latest main
+uv pip install 'autoresearch[wandb] @ git+https://github.com/charleneleong-ai/autoresearch.git'
 ```
+
+Optional extras:
+- `[pr]` — adds `requests` for the `pr_updater` daemon's PATCH path
+- `[wandb]` — enables `wandb_history.fetch_history` and the `gradient_collapse` retrospective detector
 
 For development on this package itself, use the `mise` task runner:
 
@@ -117,18 +123,29 @@ post_iter_retrospective:
     - triage_threshold_mismatch
     - eval_score_plateau
     - bucketed_failure
+    - gradient_collapse                                          # needs [wandb] extra
   detector_kwargs:
-    triage_threshold_mismatch: { min_first_score_step: 150 }   # task-specific
-    bucketed_failure: { bucket_field: ground_truth_trigger }   # rubric field name
+    triage_threshold_mismatch: { min_first_score_step: 150 }    # task-specific
+    bucketed_failure: { bucket_field: ground_truth_trigger }    # rubric field name
+    gradient_collapse: { loss_key: train/policy_loss, window: 100 }
   on_finding:
     - { severity: warn,  action: append_to_next_iter_notes }
     - { severity: block, action: stop_sweep }
 ```
 
+`gradient_collapse` reads `train/loss` and `train/reward` (or whatever you
+configure under `loss_key`/`reward_key`) from the iter's wandb run via
+`wandb_url` in the row, and fires `severity=block` when loss has collapsed
+near zero AND reward has gone flat over the recent window — the joint
+pattern that means the optimizer is stuck. It silently skips when:
+`wandb_url` is absent (project doesn't use wandb), the `[wandb]` extra
+isn't installed, history is shorter than `window`, or the wandb API call
+fails.
+
 Custom detectors (project-specific — e.g. `obs_collision` for game-agent
-sweeps, `gradient_collapse` for RL with wandb history) are added by passing
-your own `FailureDetector` callables to `audit_iter` or by registering them
-into a custom dict and forwarding to `RetrospectiveSpec.selected_detectors`.
+sweeps with state-jsonl obs ambiguity) are added by passing your own
+`FailureDetector` callables to `audit_iter` or by registering them into a
+custom dict and forwarding to `RetrospectiveSpec.selected_detectors`.
 
 ```bash
 # Append a new milestone after each sweep verdict — milestones.yaml is the
@@ -192,7 +209,8 @@ Alpha, personal use. Validated against live multi-month sweeps. Current modules 
 | `current_run` | Daemon: in-flight RUNNING dot driver |
 | `report` | Per-sweep markdown writeup scaffolder |
 | `verdict` | Cross-tag ablation verdict — HELPS / NEUTRAL / REGRESSES + optional PR comment |
-| `retrospective` | Post-iter failure-mode audit — pluggable detectors (silent_kill / triage_threshold_mismatch / eval_score_plateau / bucketed_failure) write findings into `results.jsonl` + sibling `retrospective_<iter>.md`. Self-correcting loop: warn-level findings are designed to feed the next iter's notes; block-level should stop the sweep. ([#16](https://github.com/charleneleong-ai/autoresearch/issues/16)) |
+| `retrospective` | Post-iter failure-mode audit — pluggable detectors (silent_kill / triage_threshold_mismatch / eval_score_plateau / bucketed_failure / gradient_collapse) write findings into `results.jsonl` + sibling `retrospective_<iter>.md`. Self-correcting loop: warn-level findings are designed to feed the next iter's notes; block-level should stop the sweep. ([#16](https://github.com/charleneleong-ai/autoresearch/issues/16), [#18](https://github.com/charleneleong-ai/autoresearch/issues/18)) |
+| `wandb_history` | Thin adapter: `fetch_history(run_url, keys, samples)` → `dict[str, list[float]]`. Lazy wandb import behind the `[wandb]` extra; powers `gradient_collapse` and any future detectors that read training-time series |
 | `gpu_monitor` | GPU util/memory tracker context manager |
 
 ## Releasing — automatic on merge to main

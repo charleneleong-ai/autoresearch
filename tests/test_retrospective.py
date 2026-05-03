@@ -420,5 +420,160 @@ def test_cli_audit_writes_md_and_updates_jsonl(runner: CliRunner, tmp_path: Path
     assert len(updated["retrospective"]["findings"]) >= 1
 
 
+# ── gradient_collapse ──────────────────────────────────────────────────
+#
+# fetch_history is monkeypatched in every test so no real wandb calls happen.
+# That keeps CI fast + offline + works without the [wandb] extra installed.
+
+
+def _stub_history(monkeypatch: pytest.MonkeyPatch, series: dict[str, list[float]]) -> None:
+    """Replace autoresearch.wandb_history.fetch_history with a fixed return."""
+    import autoresearch.wandb_history as mod
+
+    def fake_fetch_history(*, run_url: str, keys: list[str], samples: int = 500) -> dict:
+        return {k: series.get(k, []) for k in keys}
+
+    monkeypatch.setattr(mod, "fetch_history", fake_fetch_history)
+
+
+def test_gradient_collapse_silent_without_wandb_url() -> None:
+    row = {"experiment": 1, "status": "KEEP"}
+    assert BUILTIN_DETECTORS["gradient_collapse"](IterContext(row)) is None
+
+
+def test_gradient_collapse_fires_on_loss_zero_and_flat_reward(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_history(
+        monkeypatch,
+        {
+            "train/loss": [0.001] * 60,  # collapsed near zero
+            "train/reward": [0.42] * 60,  # perfectly flat → CV = 0
+        },
+    )
+    row = {"experiment": 1, "status": "KEEP", "wandb_url": "charlene/orak/abc"}
+    finding = BUILTIN_DETECTORS["gradient_collapse"](IterContext(row))
+    assert finding is not None
+    assert finding.severity == "block"
+    assert "E1" in finding.summary
+    assert "train/loss" in finding.summary
+    assert "train/reward" in finding.summary
+
+
+def test_gradient_collapse_silent_when_loss_still_high(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_history(
+        monkeypatch,
+        {"train/loss": [0.5] * 60, "train/reward": [0.42] * 60},
+    )
+    row = {"experiment": 1, "wandb_url": "charlene/orak/abc"}
+    assert BUILTIN_DETECTORS["gradient_collapse"](IterContext(row)) is None
+
+
+def test_gradient_collapse_silent_when_reward_still_moves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Loss collapsed but reward is volatile → not a collapse signal
+    _stub_history(
+        monkeypatch,
+        {
+            "train/loss": [0.001] * 60,
+            "train/reward": [0.1, 0.4, 0.7, 0.2, 0.9] * 12,
+        },
+    )
+    row = {"experiment": 1, "wandb_url": "charlene/orak/abc"}
+    assert BUILTIN_DETECTORS["gradient_collapse"](IterContext(row)) is None
+
+
+def test_gradient_collapse_silent_when_history_too_short(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_history(
+        monkeypatch,
+        {"train/loss": [0.001] * 10, "train/reward": [0.42] * 10},
+    )
+    row = {"experiment": 1, "wandb_url": "charlene/orak/abc"}
+    # Default window=50; only 10 samples → can't decide
+    assert BUILTIN_DETECTORS["gradient_collapse"](IterContext(row)) is None
+
+
+def test_gradient_collapse_handles_zero_mean_reward(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When mean(reward)≈0, CV is undefined; the detector should still fire on
+    the collapse pattern (loss ≈ 0 + reward stuck at 0 = no learning)."""
+    _stub_history(
+        monkeypatch,
+        {"train/loss": [0.001] * 60, "train/reward": [0.0] * 60},
+    )
+    row = {"experiment": 1, "wandb_url": "charlene/orak/abc"}
+    finding = BUILTIN_DETECTORS["gradient_collapse"](IterContext(row))
+    assert finding is not None
+    assert "block" == finding.severity
+
+
+def test_gradient_collapse_respects_custom_thresholds(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_history(
+        monkeypatch,
+        {"train/loss": [0.08] * 60, "train/reward": [0.42] * 60},
+    )
+    row = {"experiment": 1, "wandb_url": "charlene/orak/abc"}
+    detector = BUILTIN_DETECTORS["gradient_collapse"]
+    # Default loss_near_zero=0.05 — 0.08 doesn't qualify
+    assert detector(IterContext(row)) is None
+    # Loosen threshold → fires
+    ctx = IterContext(
+        row,
+        detector_kwargs={"gradient_collapse": {"loss_near_zero_threshold": 0.1}},
+    )
+    assert detector(ctx) is not None
+
+
+def test_gradient_collapse_silent_on_wandb_api_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If fetch_history raises ValueError (bad URL) or RuntimeError (API failure),
+    the detector should silently skip — sweep keeps going, no spurious finding."""
+    import autoresearch.wandb_history as mod
+
+    def boom(*, run_url: str, keys: list[str], samples: int = 500) -> dict:
+        raise RuntimeError("wandb api refused: 401 unauthorized")
+
+    monkeypatch.setattr(mod, "fetch_history", boom)
+    row = {"experiment": 1, "wandb_url": "charlene/orak/abc"}
+    assert BUILTIN_DETECTORS["gradient_collapse"](IterContext(row)) is None
+
+
+def test_gradient_collapse_silent_when_wandb_extra_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If `from autoresearch.wandb_history import fetch_history` itself raises
+    ImportError (e.g. wandb_history transitively depends on wandb in some
+    future version), the detector returns None instead of crashing."""
+    import builtins
+    import sys
+
+    # Simulate an ImportError on the import line in _gradient_collapse by
+    # nuking the cached module + replacing __import__ to raise for it.
+    sys.modules.pop("autoresearch.wandb_history", None)
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: object, **kwargs: object):
+        if name == "autoresearch.wandb_history":
+            raise ImportError("simulated missing extra")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    row = {"experiment": 1, "wandb_url": "charlene/orak/abc"}
+    assert BUILTIN_DETECTORS["gradient_collapse"](IterContext(row)) is None
+
+
+# ── registry sanity ────────────────────────────────────────────────────
+
+
+def test_gradient_collapse_in_registry() -> None:
+    assert "gradient_collapse" in BUILTIN_DETECTORS
+    assert BUILTIN_DETECTORS["gradient_collapse"].name == "gradient_collapse"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
