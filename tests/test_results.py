@@ -238,5 +238,97 @@ def test_categorize_kill_reason_categories_constant_is_complete() -> None:
         assert cat in KILL_CATEGORIES, f"category {cat!r} from {s!r} missing from KILL_CATEGORIES"
 
 
+# ── extra_classifier hook ──────────────────────────────────────────────
+
+
+def test_extra_classifier_wins_when_returns_tuple() -> None:
+    def extra(kr: str) -> tuple[str, dict[str, str]] | None:
+        if "tokenizer race" in kr:
+            return "tokenizer_race", {}
+        return None
+
+    cat, extras = categorize_kill_reason(
+        "tokenizer race detected at step 12", extra_classifier=extra
+    )
+    assert cat == "tokenizer_race"
+    assert extras == {}
+
+
+def test_extra_classifier_extras_passthrough() -> None:
+    import re as _re
+
+    def extra(kr: str) -> tuple[str, dict[str, str]] | None:
+        m = _re.search(r"retry-after=([\d.]+)", kr)
+        if "wandb 429" in kr:
+            return "wandb_throttle", ({"retry_after": m.group(1)} if m else {})
+        return None
+
+    cat, extras = categorize_kill_reason("wandb 429 retry-after=30.0", extra_classifier=extra)
+    assert cat == "wandb_throttle"
+    assert extras == {"retry_after": "30.0"}
+
+
+def test_extra_classifier_returning_none_falls_through_to_builtins() -> None:
+    def extra(kr: str) -> tuple[str, dict[str, str]] | None:
+        return None  # never matches anything
+
+    cat, extras = categorize_kill_reason(
+        "|kl|=0.7 suggests policy divergence", extra_classifier=extra
+    )
+    assert cat == KILL_POLICY_DIVERGENCE
+    assert extras == {"kl": "0.7"}
+
+
+def test_extra_classifier_can_override_builtin_categories() -> None:
+    # Project deliberately reclassifies a string the builtin would catch.
+    # This is intentional — extra_classifier runs FIRST.
+    def extra(kr: str) -> tuple[str, dict[str, str]] | None:
+        if "kl" in kr:
+            return "custom_kl_handler", {"raw": kr}
+        return None
+
+    cat, extras = categorize_kill_reason(
+        "|kl|=0.7 suggests policy divergence", extra_classifier=extra
+    )
+    assert cat == "custom_kl_handler"
+    assert extras == {"raw": "|kl|=0.7 suggests policy divergence"}
+
+
+def test_extra_classifier_receives_lowercased_input() -> None:
+    seen: list[str] = []
+
+    def extra(kr: str) -> tuple[str, dict[str, str]] | None:
+        seen.append(kr)
+        return None
+
+    categorize_kill_reason("MIXED Case Reason", extra_classifier=extra)
+    assert seen == ["mixed case reason"]
+
+
+def test_extra_classifier_not_called_for_empty_reason() -> None:
+    seen: list[str] = []
+
+    def extra(kr: str) -> tuple[str, dict[str, str]] | None:
+        seen.append(kr)
+        return ("never", {})
+
+    cat, extras = categorize_kill_reason("", extra_classifier=extra)
+    assert cat == KILL_UNKNOWN
+    assert extras == {}
+    assert seen == []  # short-circuit before classifier runs
+
+    cat2, extras2 = categorize_kill_reason(None, extra_classifier=extra)
+    assert cat2 == KILL_UNKNOWN
+    assert extras2 == {}
+    assert seen == []
+
+
+def test_extra_classifier_default_none_keeps_builtin_behaviour() -> None:
+    # No regression for callers that don't pass extra_classifier.
+    cat, extras = categorize_kill_reason("|kl|=0.5 suggests policy divergence")
+    assert cat == KILL_POLICY_DIVERGENCE
+    assert extras == {"kl": "0.5"}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

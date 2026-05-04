@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
@@ -244,7 +245,18 @@ _SPIKE_NUM_RE = re.compile(r"spike ([\d.]+)s")
 _SLOW_NUM_RE = re.compile(r"= ?([\d.]+)s")
 
 
-def categorize_kill_reason(reason: str | None) -> tuple[str, dict[str, str]]:
+# Type alias for project-supplied classifiers passed to
+# `categorize_kill_reason(extra_classifier=...)`. Receives the lowercased
+# reason; returns a (category, extras) tuple to win, or None to fall through
+# to the builtin patterns.
+KillClassifier = Callable[[str], tuple[str, dict[str, str]] | None]
+
+
+def categorize_kill_reason(
+    reason: str | None,
+    *,
+    extra_classifier: KillClassifier | None = None,
+) -> tuple[str, dict[str, str]]:
     """Pattern-match a free-form triage ``kill_reason`` into a stable category
     plus any extracted numeric extras.
 
@@ -253,29 +265,70 @@ def categorize_kill_reason(reason: str | None) -> tuple[str, dict[str, str]]:
     GPU, or learning-rate reasons. Output is a tuple so each project can
     format its own short label string from the same classification.
 
+    Parameters
+    ----------
+    reason
+        The free-form kill-reason string. ``None`` or empty returns
+        ``(KILL_UNKNOWN, {})``.
+    extra_classifier
+        Optional project-supplied callable that runs *before* the builtin
+        patterns. Receives the **lowercased** reason; returns a ``(category,
+        extras)`` tuple to win the classification, or ``None`` to fall
+        through to the builtin GPU/loss/policy patterns. Lets a project
+        register custom failure modes (eg. ``"tokenizer_race"``,
+        ``"wandb_throttle"``) without forking the package. Empty/``None``
+        ``reason`` short-circuits to ``KILL_UNKNOWN`` *before* the
+        ``extra_classifier`` runs, so callbacks never see empty input.
+
     Returns
     -------
     tuple[str, dict[str, str]]
-        ``(category, extras)``. ``category`` is one of ``KILL_CATEGORIES``;
-        ``extras`` carries any numeric value the pattern surfaced (eg.
-        ``{"kl": "0.5"}`` for policy divergence, ``{"step_time": "210.5"}``
-        for a GPU spike). Empty dict when the pattern matched without a
-        numeric, or for ``KILL_UNKNOWN``.
+        ``(category, extras)``. ``category`` is one of ``KILL_CATEGORIES`` or
+        any string the ``extra_classifier`` returned; ``extras`` carries any
+        numeric value the pattern surfaced (eg. ``{"kl": "0.5"}`` for policy
+        divergence, ``{"step_time": "210.5"}`` for a GPU spike). Empty dict
+        when the pattern matched without a numeric, or for ``KILL_UNKNOWN``.
 
     Examples
     --------
+    Builtin patterns:
+
     >>> categorize_kill_reason("|kl|=0.7 suggests policy divergence")
     ('policy_divergence', {'kl': '0.7'})
     >>> categorize_kill_reason("step_time spike 210.5s on step 4")
     ('gpu_spike', {'step_time': '210.5'})
-    >>> categorize_kill_reason("no reward > baseline-1 in last 25 steps")
-    ('no_learning', {})
     >>> categorize_kill_reason("")
     ('unknown', {})
+
+    Project-specific extension:
+
+    >>> import re
+    >>> def my_extra(kr: str) -> tuple[str, dict[str, str]] | None:
+    ...     if "tokenizer race" in kr:
+    ...         return "tokenizer_race", {}
+    ...     if "wandb 429" in kr:
+    ...         m = re.search(r"retry-after=([\\d.]+)", kr)
+    ...         return "wandb_throttle", ({"retry_after": m.group(1)} if m else {})
+    ...     return None  # fall through to builtins
+    >>> categorize_kill_reason("tokenizer race detected", extra_classifier=my_extra)
+    ('tokenizer_race', {})
+    >>> categorize_kill_reason(
+    ...     "wandb 429 retry-after=30.0", extra_classifier=my_extra
+    ... )
+    ('wandb_throttle', {'retry_after': '30.0'})
+    >>> categorize_kill_reason(
+    ...     "|kl|=0.7 suggests policy divergence", extra_classifier=my_extra
+    ... )
+    ('policy_divergence', {'kl': '0.7'})
     """
     if not reason:
         return KILL_UNKNOWN, {}
     kr = reason.lower()
+
+    if extra_classifier is not None:
+        result = extra_classifier(kr)
+        if result is not None:
+            return result
 
     if "kl" in kr and ("policy" in kr or "divergence" in kr):
         m = _KL_NUM_RE.search(kr)
