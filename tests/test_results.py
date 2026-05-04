@@ -193,9 +193,7 @@ def test_categorize_kill_reason_gpu_hang() -> None:
 
 
 def test_categorize_kill_reason_gpu_wasted() -> None:
-    cat, _ = categorize_kill_reason(
-        "GPU util sustained <35% for 15min+ — wasted compute"
-    )
+    cat, _ = categorize_kill_reason("GPU util sustained <35% for 15min+ — wasted compute")
     assert cat == KILL_GPU_WASTED
 
 
@@ -205,9 +203,7 @@ def test_categorize_kill_reason_gpu_undersized() -> None:
 
 
 def test_categorize_kill_reason_no_learning() -> None:
-    cat, _ = categorize_kill_reason(
-        "no reward > baseline-1 (4.50) in last 25 steps; max=3.20"
-    )
+    cat, _ = categorize_kill_reason("no reward > baseline-1 (4.50) in last 25 steps; max=3.20")
     assert cat == KILL_NO_LEARNING
 
 

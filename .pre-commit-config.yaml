@@ -14,7 +14,7 @@
 repos:
   # ── House-keeping ──────────────────────────────────────────────────
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -37,7 +37,7 @@ repos:
   # log uses feat:/fix:/BREAKING CHANGE; non-conventional commits silently
   # block releases. Catching at commit-msg time saves a round-trip.
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.10.1
+    rev: v4.15.0
     hooks:
       - id: commitizen
         stages: [commit-msg]
