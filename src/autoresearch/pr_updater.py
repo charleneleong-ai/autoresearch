@@ -38,7 +38,6 @@ All git operations run in the project's working tree (`--cwd`, default `.`).
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -49,7 +48,20 @@ import typer
 from rich import print as rprint
 
 from autoresearch.render import render
-from autoresearch.results import get_score, load_results, tag_dir
+from autoresearch.results import (
+    KILL_GPU_HANG,
+    KILL_GPU_SLOW,
+    KILL_GPU_SPIKE,
+    KILL_GPU_UNDERSIZED,
+    KILL_GPU_WASTED,
+    KILL_LOSS_BLOWUP,
+    KILL_NO_LEARNING,
+    KILL_POLICY_DIVERGENCE,
+    categorize_kill_reason,
+    get_score,
+    load_results,
+    tag_dir,
+)
 
 MARKER_START = "<!-- SWEEP_NARRATIVE_START -->"
 MARKER_END = "<!-- SWEEP_NARRATIVE_END -->"
@@ -59,26 +71,32 @@ def _ts() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%MZ")
 
 
+_PR_NARRATIVE_LABELS: dict[str, str] = {
+    KILL_GPU_SPIKE: "GPU spike",
+    KILL_GPU_SLOW: "GPU slow",
+    KILL_GPU_HANG: "GPU hang",
+    KILL_GPU_WASTED: "GPU wasted",
+    KILL_GPU_UNDERSIZED: "GPU undersized",
+    KILL_LOSS_BLOWUP: "loss blow-up",
+    KILL_NO_LEARNING: "no learning",
+}
+
+
 def _kill_short(kill_reason: str) -> str:
-    """Map a long triage reason to a short narrative-table tag."""
-    kr = (kill_reason or "").lower()
-    if "kl" in kr and ("policy" in kr or "divergence" in kr):
-        m = re.search(r"\|kl\|=([\d.]+)", kr)
-        return f"`kl={m.group(1)}` (policy)" if m else "policy divergence"
-    if "step_time" in kr and "spike" in kr:
-        return "GPU spike"
-    if "step_time" in kr or "slow" in kr:
-        return "GPU slow"
-    if "loss" in kr:
-        return "loss blow-up"
-    if "no reward" in kr or "baseline" in kr:
-        return "no learning"
-    if "wasted compute" in kr or "underutil" in kr:
-        return "GPU wasted"
-    if "undersized" in kr or "peak" in kr and "mem" in kr:
-        return "GPU undersized"
-    if "hang" in kr:
-        return "GPU hang"
+    """Map a long triage reason to a short narrative-table tag.
+
+    Thin formatter over :func:`autoresearch.results.categorize_kill_reason`.
+    The PR narrative table favours markdown-formatted values for the policy-
+    divergence case (e.g. `` `kl=0.7` (policy) ``); other categories use
+    plain-text labels keyed off the categoriser's stable category codes.
+    """
+    category, extras = categorize_kill_reason(kill_reason)
+    if category == KILL_POLICY_DIVERGENCE:
+        return f"`kl={extras['kl']}` (policy)" if extras else "policy divergence"
+    if category in _PR_NARRATIVE_LABELS:
+        return _PR_NARRATIVE_LABELS[category]
+    # KILL_UNKNOWN — fall back to a truncated raw reason so the narrative
+    # table still surfaces a hint instead of a generic "killed".
     return kill_reason[:40] if kill_reason else "killed"
 
 

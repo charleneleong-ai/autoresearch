@@ -13,9 +13,10 @@ trampling each other's JSONL.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 # gemma4-rlvr writes "score"; orak writes "evaluation_score". Readers should
 # accept both — this list is the canonical fallback order.
@@ -209,3 +210,91 @@ def relabel_last_as_early_kill(
     if patched:
         results_file.write_text("\n".join(lines) + "\n")
     return patched
+
+
+# ── kill-reason categorisation ─────────────────────────────────────────
+
+# Public category codes. Stable strings so caller code can switch on them
+# without depending on an Enum identity.
+KILL_POLICY_DIVERGENCE: Final = "policy_divergence"
+KILL_LOSS_BLOWUP: Final = "loss_blowup"
+KILL_GPU_SPIKE: Final = "gpu_spike"
+KILL_GPU_SLOW: Final = "gpu_slow"
+KILL_GPU_HANG: Final = "gpu_hang"
+KILL_GPU_WASTED: Final = "gpu_wasted"
+KILL_GPU_UNDERSIZED: Final = "gpu_undersized"
+KILL_NO_LEARNING: Final = "no_learning"
+KILL_UNKNOWN: Final = "unknown"
+
+KILL_CATEGORIES: Final[tuple[str, ...]] = (
+    KILL_POLICY_DIVERGENCE,
+    KILL_LOSS_BLOWUP,
+    KILL_GPU_SPIKE,
+    KILL_GPU_SLOW,
+    KILL_GPU_HANG,
+    KILL_GPU_WASTED,
+    KILL_GPU_UNDERSIZED,
+    KILL_NO_LEARNING,
+    KILL_UNKNOWN,
+)
+
+_KL_NUM_RE = re.compile(r"\|kl\|=([\d.]+)")
+_LOSS_NUM_RE = re.compile(r"\|loss\|=([\d.]+)")
+_SPIKE_NUM_RE = re.compile(r"spike ([\d.]+)s")
+_SLOW_NUM_RE = re.compile(r"= ?([\d.]+)s")
+
+
+def categorize_kill_reason(reason: str | None) -> tuple[str, dict[str, str]]:
+    """Pattern-match a free-form triage ``kill_reason`` into a stable category
+    plus any extracted numeric extras.
+
+    The categoriser captures the union of patterns that sweep loops in
+    gemma4-rlvr and orak-2025-starter-kit emit when killing a run for triage,
+    GPU, or learning-rate reasons. Output is a tuple so each project can
+    format its own short label string from the same classification.
+
+    Returns
+    -------
+    tuple[str, dict[str, str]]
+        ``(category, extras)``. ``category`` is one of ``KILL_CATEGORIES``;
+        ``extras`` carries any numeric value the pattern surfaced (eg.
+        ``{"kl": "0.5"}`` for policy divergence, ``{"step_time": "210.5"}``
+        for a GPU spike). Empty dict when the pattern matched without a
+        numeric, or for ``KILL_UNKNOWN``.
+
+    Examples
+    --------
+    >>> categorize_kill_reason("|kl|=0.7 suggests policy divergence")
+    ('policy_divergence', {'kl': '0.7'})
+    >>> categorize_kill_reason("step_time spike 210.5s on step 4")
+    ('gpu_spike', {'step_time': '210.5'})
+    >>> categorize_kill_reason("no reward > baseline-1 in last 25 steps")
+    ('no_learning', {})
+    >>> categorize_kill_reason("")
+    ('unknown', {})
+    """
+    if not reason:
+        return KILL_UNKNOWN, {}
+    kr = reason.lower()
+
+    if "kl" in kr and ("policy" in kr or "divergence" in kr):
+        m = _KL_NUM_RE.search(kr)
+        return KILL_POLICY_DIVERGENCE, ({"kl": m.group(1)} if m else {})
+    if "loss" in kr and ("divergence" in kr or "blow" in kr):
+        m = _LOSS_NUM_RE.search(kr)
+        return KILL_LOSS_BLOWUP, ({"loss": m.group(1)} if m else {})
+    if "step_time" in kr and "spike" in kr:
+        m = _SPIKE_NUM_RE.search(kr)
+        return KILL_GPU_SPIKE, ({"step_time": m.group(1)} if m else {})
+    if "hang" in kr:
+        return KILL_GPU_HANG, {}
+    if "step_time" in kr or "slow" in kr:
+        m = _SLOW_NUM_RE.search(kr)
+        return KILL_GPU_SLOW, ({"step_time": m.group(1)} if m else {})
+    if "wasted compute" in kr or "underutil" in kr:
+        return KILL_GPU_WASTED, {}
+    if "undersized" in kr or ("peak" in kr and "mem" in kr):
+        return KILL_GPU_UNDERSIZED, {}
+    if "no reward" in kr or "baseline" in kr:
+        return KILL_NO_LEARNING, {}
+    return KILL_UNKNOWN, {}

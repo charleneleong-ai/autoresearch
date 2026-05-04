@@ -7,6 +7,17 @@ from pathlib import Path
 import pytest
 
 from autoresearch.results import (
+    KILL_CATEGORIES,
+    KILL_GPU_HANG,
+    KILL_GPU_SLOW,
+    KILL_GPU_SPIKE,
+    KILL_GPU_UNDERSIZED,
+    KILL_GPU_WASTED,
+    KILL_LOSS_BLOWUP,
+    KILL_NO_LEARNING,
+    KILL_POLICY_DIVERGENCE,
+    KILL_UNKNOWN,
+    categorize_kill_reason,
     filter_by_game,
     get_score,
     load_results,
@@ -136,6 +147,99 @@ def test_filter_by_game_none_returns_all() -> None:
 def test_filter_by_game_empty_string_returns_all() -> None:
     rows = [{"game": "a"}]
     assert filter_by_game(rows, "") == rows
+
+
+# ── categorize_kill_reason ─────────────────────────────────────────────
+
+
+def test_categorize_kill_reason_policy_with_kl_value() -> None:
+    cat, extras = categorize_kill_reason("|kl|=0.7 suggests policy divergence")
+    assert cat == KILL_POLICY_DIVERGENCE
+    assert extras == {"kl": "0.7"}
+
+
+def test_categorize_kill_reason_policy_without_value() -> None:
+    cat, extras = categorize_kill_reason("policy collapse — kl divergence in head")
+    assert cat == KILL_POLICY_DIVERGENCE
+    assert extras == {}
+
+
+def test_categorize_kill_reason_loss_blowup() -> None:
+    cat, extras = categorize_kill_reason("|loss|=12.3 suggests divergence")
+    assert cat == KILL_LOSS_BLOWUP
+    assert extras == {"loss": "12.3"}
+
+
+def test_categorize_kill_reason_loss_blow_word() -> None:
+    cat, _ = categorize_kill_reason("loss blow-up at step 4")
+    assert cat == KILL_LOSS_BLOWUP
+
+
+def test_categorize_kill_reason_gpu_spike() -> None:
+    cat, extras = categorize_kill_reason("step_time spike 210.5s on step 4")
+    assert cat == KILL_GPU_SPIKE
+    assert extras == {"step_time": "210.5"}
+
+
+def test_categorize_kill_reason_gpu_slow_with_value() -> None:
+    cat, extras = categorize_kill_reason("mean step_time over last 5 = 145.2s > 130.0s")
+    assert cat == KILL_GPU_SLOW
+    assert extras == {"step_time": "145.2"}
+
+
+def test_categorize_kill_reason_gpu_hang() -> None:
+    cat, _ = categorize_kill_reason("GPU util 3% < 8% for 5min+ — likely hang")
+    assert cat == KILL_GPU_HANG
+
+
+def test_categorize_kill_reason_gpu_wasted() -> None:
+    cat, _ = categorize_kill_reason(
+        "GPU util sustained <35% for 15min+ — wasted compute"
+    )
+    assert cat == KILL_GPU_WASTED
+
+
+def test_categorize_kill_reason_gpu_undersized() -> None:
+    cat, _ = categorize_kill_reason("peak GPU mem 28% < 35% for 30min+ — undersized config")
+    assert cat == KILL_GPU_UNDERSIZED
+
+
+def test_categorize_kill_reason_no_learning() -> None:
+    cat, _ = categorize_kill_reason(
+        "no reward > baseline-1 (4.50) in last 25 steps; max=3.20"
+    )
+    assert cat == KILL_NO_LEARNING
+
+
+def test_categorize_kill_reason_unknown_falls_through() -> None:
+    cat, extras = categorize_kill_reason("something we have not seen before")
+    assert cat == KILL_UNKNOWN
+    assert extras == {}
+
+
+def test_categorize_kill_reason_empty_input() -> None:
+    assert categorize_kill_reason("") == (KILL_UNKNOWN, {})
+    assert categorize_kill_reason(None) == (KILL_UNKNOWN, {})  # type: ignore[arg-type]
+
+
+def test_categorize_kill_reason_categories_constant_is_complete() -> None:
+    # Every category code returned by the function must be in the public
+    # KILL_CATEGORIES tuple — otherwise switch-on-category callers will
+    # silently break when a new code is added.
+    samples = [
+        "|kl|=0.5",
+        "|loss|=12 divergence",
+        "step_time spike 200s",
+        "mean step_time slow",
+        "hang",
+        "wasted compute",
+        "peak mem undersized",
+        "no reward",
+        "novel reason",
+    ]
+    for s in samples:
+        cat, _ = categorize_kill_reason(s)
+        assert cat in KILL_CATEGORIES, f"category {cat!r} from {s!r} missing from KILL_CATEGORIES"
 
 
 if __name__ == "__main__":
