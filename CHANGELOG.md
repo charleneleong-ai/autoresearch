@@ -1,3 +1,9 @@
+## v0.13.0 (2026-05-04)
+
+### Feat
+
+- **results**: public categorize_kill_reason classifier
+
 ## v0.12.0 (2026-05-03)
 
 ### Feat
