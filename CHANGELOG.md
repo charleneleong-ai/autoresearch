@@ -1,3 +1,10 @@
+## v0.14.0 (2026-05-04)
+
+### Feat
+
+- **results**: extra_classifier hook for project-specific kill categories
+- **results**: public categorize_kill_reason classifier (v0.13.0) (#26)
+
 ## v0.13.0 (2026-05-04)
 
 ### Feat
