@@ -1,3 +1,9 @@
+## v0.18.0 (2026-05-05)
+
+### Feat
+
+- **llm-utils**: retry_utils + prompt_caching + normalization — phase 1 from orak (#34)
+
 ## v0.17.0 (2026-05-05)
 
 ### Feat
