@@ -1,3 +1,9 @@
+## v0.19.4 (2026-05-05)
+
+### Fix
+
+- **ci**: empty-commit kick to trigger workflows on bot-opened release PR (#44)
+
 ## v0.19.3 (2026-05-05)
 
 ### Fix
