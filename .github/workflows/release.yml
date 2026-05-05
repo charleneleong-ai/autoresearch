@@ -183,9 +183,12 @@ jobs:
           set -euo pipefail
           BRANCH="release/v${VERSION}"
           git checkout -b "$BRANCH"
-          # Updates pyproject.toml:version, __init__.py:__version__, CHANGELOG.md
-          # Does NOT push a tag — publish job creates it after this PR merges.
+          # Updates pyproject.toml:version, __init__.py:__version__, CHANGELOG.md.
+          # cz bump also creates a local tag — delete it immediately so it is
+          # never accidentally pushed. The publish job creates the tag at the
+          # correct main HEAD after this PR squash-merges.
           cz bump --yes --no-verify
+          git tag -d "v${VERSION}" || true
           git push origin "$BRANCH"
           gh pr create \
             --base main \
