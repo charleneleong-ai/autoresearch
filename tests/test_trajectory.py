@@ -307,12 +307,33 @@ def test_format_recent_history_empty() -> None:
 
 def test_format_recent_history_score_delta_and_state_change() -> None:
     records = [
-        StepRecord(step=1, system_prompt=None, user_prompt="u", assistant_output="a",
-                   action="north", info_score=0.0, obs_digest="aaa"),
-        StepRecord(step=2, system_prompt=None, user_prompt="u", assistant_output="a",
-                   action="north", info_score=0.0, obs_digest="aaa"),
-        StepRecord(step=3, system_prompt=None, user_prompt="u", assistant_output="a",
-                   action="east", info_score=1.0, obs_digest="bbb"),
+        StepRecord(
+            step=1,
+            system_prompt=None,
+            user_prompt="u",
+            assistant_output="a",
+            action="north",
+            info_score=0.0,
+            obs_digest="aaa",
+        ),
+        StepRecord(
+            step=2,
+            system_prompt=None,
+            user_prompt="u",
+            assistant_output="a",
+            action="north",
+            info_score=0.0,
+            obs_digest="aaa",
+        ),
+        StepRecord(
+            step=3,
+            system_prompt=None,
+            user_prompt="u",
+            assistant_output="a",
+            action="east",
+            info_score=1.0,
+            obs_digest="bbb",
+        ),
     ]
     lines = format_recent_history(records).splitlines()
     assert "state=initial" in lines[0]
@@ -323,8 +344,9 @@ def test_format_recent_history_score_delta_and_state_change() -> None:
 
 
 def test_format_recent_history_missing_score() -> None:
-    records = [StepRecord(step=1, system_prompt=None, user_prompt="u",
-                          assistant_output="a", action="x")]
+    records = [
+        StepRecord(step=1, system_prompt=None, user_prompt="u", assistant_output="a", action="x")
+    ]
     out = format_recent_history(records)
     assert "score=?" in out
     assert "state=?" in out
@@ -332,8 +354,15 @@ def test_format_recent_history_missing_score() -> None:
 
 def test_format_recent_history_action_truncated_at_60_chars() -> None:
     records = [
-        StepRecord(step=1, system_prompt=None, user_prompt="u", assistant_output="a",
-                   action="z" * 200, info_score=1.0, obs_digest="x"),
+        StepRecord(
+            step=1,
+            system_prompt=None,
+            user_prompt="u",
+            assistant_output="a",
+            action="z" * 200,
+            info_score=1.0,
+            obs_digest="x",
+        ),
     ]
     out = format_recent_history(records)
     assert "z" * 60 in out
