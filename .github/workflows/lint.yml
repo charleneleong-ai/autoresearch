@@ -4,6 +4,11 @@ name: Lint
 # `mise run init` registers locally. Single source of truth: edit hooks
 # in .pre-commit-config.yaml and they auto-land in CI without touching
 # this workflow.
+#
+# Also enforces that pyproject.toml:version is never manually bumped on
+# feature/fix branches — version changes must only arrive via the
+# automated release/v* bump PR opened by release.yml.
+
 on:
   pull_request:
   push:
@@ -22,3 +27,31 @@ jobs:
 
       # Caches the hook envs by config-hash so repeat runs are fast.
       - uses: pre-commit/action@v3.0.1
+
+  version-guard:
+    name: No manual version bumps
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail if pyproject.toml version changed on a non-release branch
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          if [[ "$BRANCH" == release/v* ]]; then
+            echo "::notice::Release branch — version bump allowed."
+            exit 0
+          fi
+          BASE_VERSION=$(git show origin/${{ github.base_ref }}:pyproject.toml \
+            | grep -E '^version = ' | head -1 | sed -E 's/version = "(.*)"/\1/')
+          PR_VERSION=$(grep -E '^version = ' pyproject.toml \
+            | head -1 | sed -E 's/version = "(.*)"/\1/')
+          if [ "$BASE_VERSION" != "$PR_VERSION" ]; then
+            echo "::error::pyproject.toml version changed from $BASE_VERSION → $PR_VERSION on branch '$BRANCH'."
+            echo "::error::Version bumps must come from the automated release/v* PR opened by release.yml."
+            echo "::error::Revert the version change and let CI handle it after merge."
+            exit 1
+          fi
+          echo "::notice::Version unchanged ($PR_VERSION) — OK."
