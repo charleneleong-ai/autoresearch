@@ -225,3 +225,12 @@ jobs:
           - **Once this PR squash-merges, \`release.yml\` re-runs on \`main\`, the catch-up step detects the unreleased \`v${VERSION}\` tag, builds the wheel/sdist, and publishes the GitHub Release.**
 
           Branch protection on \`main\` requires the standard CI checks (pre-commit + pytest) to pass before merge. If repo-level auto-merge is enabled, this PR will land automatically; otherwise merge manually once green."
+
+          # GitHub silently skips workflows for PRs opened by github-actions[bot]
+          # (security guardrail to prevent privilege escalation: a bot-opened
+          # PR auto-running another workflow could chain attacks). Branch
+          # protection then refuses the merge because required checks never
+          # ran. Push an empty commit to the same branch so Lint + Test fire
+          # naturally and the PR becomes mergeable.
+          git commit --allow-empty -m "ci: trigger workflows on bot-opened release PR"
+          git push origin "$BRANCH"
