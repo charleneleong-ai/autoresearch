@@ -66,6 +66,10 @@ jobs:
       #   - a manually-merged release-bump PR
       #   - a manually-pushed tag (eg. cz bump done locally)
       #   - the first run after switching to PR-based bumps (this PR)
+      #
+      # Also re-points the tag to current main HEAD if it was created on a
+      # release branch that since squash-merged. See the multi-paragraph
+      # comment inside the step for the failure mode this prevents.
       - name: Catch up GitHub Release for current pyproject version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -82,6 +86,39 @@ jobs:
             echo "::notice::Tag $TAG already has a GitHub Release — nothing to catch up."
             exit 0
           fi
+
+          # Re-point the tag to current main HEAD if it's elsewhere.
+          #
+          # The bump-PR step creates the tag on the release/vX.Y.Z branch
+          # at the bump commit, then GitHub squash-merges the PR onto main
+          # — which produces a NEW commit containing the bump content but
+          # leaves the tag pointing at the original release-branch commit
+          # (not in main's lineage). The next release.yml run on a
+          # subsequent feat: PR then sees the tag as orphaned from main
+          # and `cz bump --dry-run` walks main's full history, treating
+          # ALL prior feat: commits as eligible — so the next bump opens
+          # a release branch from a stale base, missing whichever feats
+          # squash-merged after the original bump branch was opened.
+          #
+          # Hit on autoresearch v0.18.0: PR #33 (token_confidence) merged
+          # between PR #34 and the v0.18.0 bump → v0.18.0 tag landed
+          # without token_confidence.py and v0.19.0 had to ship as a
+          # catch-up release with the actual content.
+          #
+          # Fix: every catch-up run re-anchors the tag to current main
+          # HEAD before publishing the Release artifact. Idempotent
+          # (no-op when tag is already at HEAD) and only ever moves the
+          # tag forward in time on main's lineage.
+          TAG_SHA=$(git rev-parse "$TAG")
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ "$TAG_SHA" != "$HEAD_SHA" ]; then
+            echo "::notice::Tag $TAG was at $TAG_SHA — re-pointing to current main HEAD $HEAD_SHA (post squash-merge)"
+            git tag -f "$TAG" HEAD
+            git push origin "$TAG" --force
+          else
+            echo "::notice::Tag $TAG already at HEAD — no re-anchoring needed."
+          fi
+
           echo "::notice::Tag $TAG exists with no Release — building artifacts and publishing."
           python -m build
           uv pip install --system pytest
