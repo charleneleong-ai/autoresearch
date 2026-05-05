@@ -66,9 +66,67 @@ def has_incomplete_scratchpad(content: str) -> bool:
     return "<REASONING_SCRATCHPAD>" in content and "</REASONING_SCRATCHPAD>" not in content
 
 
+def format_recent_history(records: list[StepRecord]) -> str:
+    """Render a compact outcome-tagged history block from recent step records.
+
+    Format::
+
+        step 12: action=move_north  score=1 (+0)  state=changed
+        step 13: action=move_north  score=1 (+0)  state=unchanged (loop?)
+        step 14: action=move_east   score=1 (+0)  state=changed
+
+    Two signals — ``score_delta`` against the previous step and
+    ``state=changed/unchanged`` (via ``obs_digest`` equality) — give the
+    planner enough evidence for anti-loop / continue-what's-working
+    heuristics to fire.  Returns an empty string when ``records`` is empty.
+    """
+    if not records:
+        return ""
+    lines: list[str] = []
+    for i, r in enumerate(records):
+        score = r.info_score
+        if score is None:
+            score_str = "score=?"
+        else:
+            prev_score = records[i - 1].info_score if i > 0 else None
+            if prev_score is None:
+                score_str = f"score={_fmt_score(score)}"
+            else:
+                delta = score - prev_score
+                sign = "+" if delta >= 0 else ""
+                score_str = f"score={_fmt_score(score)} ({sign}{_fmt_score(delta)})"
+
+        if r.obs_digest is None:
+            state_str = "state=?"
+        elif i == 0:
+            state_str = "state=initial"
+        elif r.obs_digest == records[i - 1].obs_digest:
+            state_str = "state=unchanged (loop?)"
+        else:
+            state_str = "state=changed"
+
+        action = (r.action or "").strip().splitlines()[0][:60] if r.action else "?"
+        lines.append(f"step {r.step}: action={action}  {score_str}  {state_str}")
+    return "\n".join(lines)
+
+
+def _fmt_score(value: float) -> str:
+    if value == int(value):
+        return str(int(value))
+    return f"{value:.2f}"
+
+
 @dataclass
 class StepRecord:
-    """One agent-environment step. Renders to ShareGPT via :meth:`to_sharegpt`."""
+    """One agent-environment step. Renders to ShareGPT via :meth:`to_sharegpt`.
+
+    Fields added for outcome tagging (used by :func:`format_recent_history`
+    and long-horizon planners):
+
+    * ``info_score`` — game score at this step; ``None`` if unavailable.
+    * ``obs_digest`` — short hash of the observation string; used for
+      loop detection (repeated ``obs_digest`` → ``state=unchanged``).
+    """
 
     step: int
     system_prompt: str | None
@@ -82,6 +140,8 @@ class StepRecord:
     cached_tokens: int = 0
     is_fallback: bool = False
     fallback_reason: str | None = None
+    info_score: float | None = None
+    obs_digest: str | None = None
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_sharegpt(self) -> dict[str, Any]:
@@ -134,6 +194,17 @@ class TrajectoryWriter:
     def add_step(self, record: StepRecord) -> None:
         self._buffer.append(record)
 
+    def recent(self, k: int) -> list[StepRecord]:
+        """Return the last ``k`` step records from the live in-episode buffer.
+
+        Used by long-horizon agents (e.g. a subtask planner) to feed
+        outcome-tagged history into the next plan call without waiting for
+        episode flush.  Returns an empty list when ``k <= 0``.
+        """
+        if k <= 0:
+            return []
+        return list(self._buffer[-k:])
+
     def flush_episode(
         self,
         episode_id: int,
@@ -184,5 +255,6 @@ __all__ = [
     "StepRecord",
     "TrajectoryWriter",
     "convert_scratchpad_to_think",
+    "format_recent_history",
     "has_incomplete_scratchpad",
 ]

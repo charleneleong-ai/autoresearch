@@ -101,6 +101,7 @@ from autoresearch.trajectory import (
     StepRecord,
     TrajectoryWriter,
     convert_scratchpad_to_think,
+    format_recent_history,
     has_incomplete_scratchpad,
 )
 from autoresearch.verdict import (
@@ -168,6 +169,7 @@ __all__ = [
     # trajectory writer for agentic-RL pipelines
     "StepRecord",
     "TrajectoryWriter",
+    "format_recent_history",
     "convert_scratchpad_to_think",
     "has_incomplete_scratchpad",
     # llm-utils phase 1 — retry / caching / normalisation
