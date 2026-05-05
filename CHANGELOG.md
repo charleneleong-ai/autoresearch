@@ -1,3 +1,9 @@
+## v0.20.0 (2026-05-05)
+
+### Feat
+
+- **trajectory**: outcome-tagging fields, TrajectoryWriter.recent(), format_recent_history (#50)
+
 ## v0.19.6 (2026-05-05)
 
 ### Fix
