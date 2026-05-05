@@ -71,6 +71,12 @@ from autoresearch.sweep_runner import (
     SweepRunner,
     TriageMonitor,
 )
+from autoresearch.trajectory import (
+    StepRecord,
+    TrajectoryWriter,
+    convert_scratchpad_to_think,
+    has_incomplete_scratchpad,
+)
 from autoresearch.verdict import (
     GameSpec,
     GameVerdict,
@@ -133,6 +139,11 @@ __all__ = [
     "compute_verdict",
     "format_markdown",
     "load_spec",
+    # trajectory writer for agentic-RL pipelines
+    "StepRecord",
+    "TrajectoryWriter",
+    "convert_scratchpad_to_think",
+    "has_incomplete_scratchpad",
     # retrospective (autoresearch#16)
     "BUILTIN_DETECTORS",
     "BUILTIN_TRANSFORMS",
