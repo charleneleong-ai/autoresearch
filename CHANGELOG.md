@@ -1,3 +1,9 @@
+## v0.15.0 (2026-05-05)
+
+### Feat
+
+- **results**: extra_classifier hook for project-specific kill categories (v0.14.0) (#27)
+
 ## v0.14.0 (2026-05-04)
 
 ### Feat
