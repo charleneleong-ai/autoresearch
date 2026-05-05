@@ -251,28 +251,16 @@ Three workflows handle CI:
 
 - **`lint.yml`** — pre-commit (ruff check + format + hygiene) on every PR and push to main; also runs `version-guard` on PRs.
 - **`test.yml`** — pytest on every PR and push to main.
-- **`release.yml`** — two jobs on every push to main:
+- **`release.yml`** — single job on every push to main:
 
-### Job 1 — `publish`
+### `Bump + Publish` job
 
-Runs on every push to main. If `pyproject.toml:version` has no matching git tag yet, it:
+1. `cz bump --dry-run` inspects commits since the last tag. If there are `feat:`/`fix:` commits, proceeds; otherwise exits cleanly (no-op).
+2. `cz bump --yes` — bumps `pyproject.toml:version`, `__init__.py:__version__`, prepends to `CHANGELOG.md`, commits as `chore: release vX.Y.Z`, and creates the tag.
+3. `git push origin HEAD:main --follow-tags` — lands the bump commit and tag on main in one shot.
+4. Builds wheel + sdist, runs `pytest` against the artifact, publishes GitHub Release.
 
-1. Creates `vX.Y.Z` tag at the current main HEAD
-2. Builds wheel + sdist
-3. Runs `pytest` against the built wheel
-4. Publishes a GitHub Release with auto-generated notes
-
-This is the **only place tags are created** — eliminates the squash-merge tag-orphan problem.
-
-### Job 2 — `bump`
-
-Runs after `publish`. `cz bump --dry-run` inspects commits since the last tag. If there are `feat:`/`fix:` commits it:
-
-1. Opens a `release/vX.Y.Z` branch with `cz bump --yes` (updates `pyproject.toml`, `__init__.py`, `CHANGELOG.md`)
-2. Opens a PR titled `chore: release vX.Y.Z`
-3. **Does not push a tag** — that is `publish`'s sole responsibility after the bump PR merges
-
-Once the bump PR squash-merges to main, the next `publish` run sees the version is ahead of all tags and creates the tag + release automatically.
+**Loop prevention**: the bump commit is `chore: release vX.Y.Z` — a `chore:` prefix — so the re-triggered run finds no bump-worthy commits between the new tag and HEAD and exits cleanly.
 
 ### How conventional commits map to semver
 
