@@ -1,3 +1,9 @@
+## v0.19.0 (2026-05-05)
+
+### Feat
+
+- **token-confidence**: per-row logprob diagnostic for eval failures (#33)
+
 ## v0.18.0 (2026-05-05)
 
 ### Feat
