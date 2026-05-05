@@ -1,3 +1,9 @@
+## v0.17.0 (2026-05-05)
+
+### Feat
+
+- **trajectory**: TrajectoryWriter + StepRecord for agentic-RL pipelines (#32)
+
 ## v0.16.0 (2026-05-05)
 
 ### Feat
