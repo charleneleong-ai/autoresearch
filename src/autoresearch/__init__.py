@@ -25,6 +25,13 @@ from autoresearch.gpu_monitor import (
     GPUTriage,
     GPUTriageThresholds,
 )
+from autoresearch.normalization import (
+    ScoreNormalizer,
+    get_normalizer,
+    normalize_score,
+    register_normalizer,
+)
+from autoresearch.prompt_caching import extract_cache_stats
 from autoresearch.results import (
     KEEP_STATUSES,
     STATUS_BASELINE,
@@ -55,6 +62,13 @@ from autoresearch.retrospective import (
 )
 from autoresearch.retrospective import (
     load_spec as load_retrospective_spec,
+)
+from autoresearch.retry_utils import (
+    ClassifiedError,
+    ErrorClass,
+    classify,
+    jittered_backoff,
+    with_retries,
 )
 from autoresearch.subprocess_utils import (
     CrashPattern,
@@ -144,6 +158,17 @@ __all__ = [
     "TrajectoryWriter",
     "convert_scratchpad_to_think",
     "has_incomplete_scratchpad",
+    # llm-utils phase 1 — retry / caching / normalisation
+    "ClassifiedError",
+    "ErrorClass",
+    "ScoreNormalizer",
+    "classify",
+    "extract_cache_stats",
+    "get_normalizer",
+    "jittered_backoff",
+    "normalize_score",
+    "register_normalizer",
+    "with_retries",
     # retrospective (autoresearch#16)
     "BUILTIN_DETECTORS",
     "BUILTIN_TRANSFORMS",
