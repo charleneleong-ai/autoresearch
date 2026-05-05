@@ -16,6 +16,7 @@ from autoresearch.results import (
     KILL_LOSS_BLOWUP,
     KILL_NO_LEARNING,
     KILL_POLICY_DIVERGENCE,
+    KILL_TIMEOUT,
     KILL_UNKNOWN,
     STATUS_BASELINE,
     STATUS_DISCARD,
@@ -235,11 +236,37 @@ def test_categorize_kill_reason_categories_constant_is_complete() -> None:
         "wasted compute",
         "peak mem undersized",
         "no reward",
+        "plateau (75%)",
+        "no improvement after steps",
+        "iter timeout",
         "novel reason",
     ]
     for s in samples:
         cat, _ = categorize_kill_reason(s)
         assert cat in KILL_CATEGORIES, f"category {cat!r} from {s!r} missing from KILL_CATEGORIES"
+
+
+def test_categorize_kill_reason_no_learning_plateau() -> None:
+    cat, extras = categorize_kill_reason("score plateau (82.5%) — no improvement in last 50 steps")
+    assert cat == KILL_NO_LEARNING
+    assert extras == {"plateau_pct": "82.5"}
+
+
+def test_categorize_kill_reason_no_learning_plateau_no_pct() -> None:
+    cat, _ = categorize_kill_reason("score has hit a plateau; stopping early")
+    assert cat == KILL_NO_LEARNING
+
+
+def test_categorize_kill_reason_no_learning_phrases() -> None:
+    for phrase in ("no improvement after 30 steps", "no_learn detected", "no learning signal"):
+        cat, _ = categorize_kill_reason(phrase)
+        assert cat == KILL_NO_LEARNING, f"expected KILL_NO_LEARNING for {phrase!r}, got {cat!r}"
+
+
+def test_categorize_kill_reason_timeout() -> None:
+    cat, extras = categorize_kill_reason("iter timeout exceeded 3600s limit")
+    assert cat == KILL_TIMEOUT
+    assert extras == {}
 
 
 # ── extra_classifier hook ──────────────────────────────────────────────

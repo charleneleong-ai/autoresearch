@@ -16,7 +16,6 @@ or triage vocabulary.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +23,22 @@ import matplotlib.pyplot as plt
 import typer
 from rich import print as rprint
 
-from autoresearch.results import filter_by_game, get_score, load_results, tag_dir
+from autoresearch.results import (
+    KILL_GPU_HANG,
+    KILL_GPU_SLOW,
+    KILL_GPU_SPIKE,
+    KILL_GPU_UNDERSIZED,
+    KILL_GPU_WASTED,
+    KILL_LOSS_BLOWUP,
+    KILL_NO_LEARNING,
+    KILL_POLICY_DIVERGENCE,
+    KILL_TIMEOUT,
+    categorize_kill_reason,
+    filter_by_game,
+    get_score,
+    load_results,
+    tag_dir,
+)
 
 _STATUS_STYLE = {
     "DISCARD": {"color": "#cccccc", "line_color": "#999", "text_color": "#777"},
@@ -36,33 +50,39 @@ _STATUS_STYLE = {
 }
 
 
-def _kill_tag(kill_reason: str) -> str:
-    """Map a long triage reason to a short category for the inline label.
+# Maps each kill category to a short display label.
+# Lambdas receive the `extras` dict from categorize_kill_reason so numeric
+# values (kl, loss, step_time, plateau_pct) can be embedded when present.
+_KILL_LABELS: dict[str, Any] = {
+    KILL_POLICY_DIVERGENCE: lambda e: (
+        f"killed: kl={e['kl']} (policy)" if "kl" in e else "killed: policy divergence"
+    ),
+    KILL_LOSS_BLOWUP: lambda e: (
+        f"killed: |loss|={e['loss']}" if "loss" in e else "killed: loss blow-up"
+    ),
+    KILL_GPU_SPIKE: lambda e: (
+        f"killed: {e['step_time']}s/step" if "step_time" in e else "killed: GPU spike"
+    ),
+    KILL_GPU_SLOW: lambda e: (
+        f"killed: {e['step_time']}s/step" if "step_time" in e else "killed: GPU slow"
+    ),
+    KILL_GPU_HANG: lambda _: "killed: GPU hang",
+    KILL_GPU_WASTED: lambda _: "killed: GPU wasted",
+    KILL_GPU_UNDERSIZED: lambda _: "killed: GPU undersized",
+    KILL_NO_LEARNING: lambda e: (
+        f"killed: plateau {e['plateau_pct']}%" if "plateau_pct" in e else "killed: no learning"
+    ),
+    KILL_TIMEOUT: lambda _: "killed: iter timeout",
+}
 
-    Recognises the patterns used by gemma4-rlvr (KL/loss divergence, GPU
-    spike) and orak (score plateau, baseline gate, iter timeout). Override
-    by passing your own `kill_tag_fn` to `render`.
-    """
-    kr = (kill_reason or "").lower()
-    if "kl" in kr and ("divergence" in kr or "policy" in kr):
-        m = re.search(r"\|kl\|=([\d.]+)", kr)
-        return f"killed: kl={m.group(1)} (policy)" if m else "killed: policy divergence"
-    if "loss" in kr and ("divergence" in kr or "blow" in kr):
-        m = re.search(r"\|loss\|=([\d.]+)", kr)
-        return f"killed: |loss|={m.group(1)}" if m else "killed: loss blow-up"
-    if "step_time" in kr or "spike" in kr:
-        m = re.search(r"([\d.]+)s", kr)
-        return f"killed: {m.group(1)}s/step" if m else "killed: GPU slow"
-    if "plateau" in kr:
-        m = re.search(r"\(([\d.]+)%\)", kr)
-        return f"killed: plateau {m.group(1)}%" if m else "killed: plateau"
-    if "no improvement" in kr or "no_learn" in kr or "no learning" in kr or "no reward" in kr:
-        return "killed: no learning"
-    if "below baseline" in kr or "baseline gate" in kr or "baseline" in kr:
-        return "killed: below baseline"
-    if "timeout" in kr:
-        return "killed: iter timeout"
-    return f"killed: {kill_reason[:30]}" if kill_reason else "killed early"
+
+def _kill_tag(kill_reason: str) -> str:
+    """Map a long triage reason to a short inline label via categorize_kill_reason."""
+    if not kill_reason:
+        return "killed early"
+    cat, extras = categorize_kill_reason(kill_reason)
+    fn = _KILL_LABELS.get(cat)
+    return fn(extras) if fn is not None else f"killed: {kill_reason[:30]}"
 
 
 def _draw_axis(
