@@ -320,6 +320,7 @@ KILL_GPU_HANG: Final = "gpu_hang"
 KILL_GPU_WASTED: Final = "gpu_wasted"
 KILL_GPU_UNDERSIZED: Final = "gpu_undersized"
 KILL_NO_LEARNING: Final = "no_learning"
+KILL_TIMEOUT: Final = "timeout"
 KILL_UNKNOWN: Final = "unknown"
 
 KILL_CATEGORIES: Final[tuple[str, ...]] = (
@@ -331,6 +332,7 @@ KILL_CATEGORIES: Final[tuple[str, ...]] = (
     KILL_GPU_WASTED,
     KILL_GPU_UNDERSIZED,
     KILL_NO_LEARNING,
+    KILL_TIMEOUT,
     KILL_UNKNOWN,
 )
 
@@ -338,6 +340,7 @@ _KL_NUM_RE = re.compile(r"\|kl\|=([\d.]+)")
 _LOSS_NUM_RE = re.compile(r"\|loss\|=([\d.]+)")
 _SPIKE_NUM_RE = re.compile(r"spike ([\d.]+)s")
 _SLOW_NUM_RE = re.compile(r"= ?([\d.]+)s")
+_PLATEAU_RE = re.compile(r"\(([\d.]+)%\)")
 
 
 # Type alias for project-supplied classifiers passed to
@@ -443,6 +446,17 @@ def categorize_kill_reason(
         return KILL_GPU_WASTED, {}
     if "undersized" in kr or ("peak" in kr and "mem" in kr):
         return KILL_GPU_UNDERSIZED, {}
-    if "no reward" in kr or "baseline" in kr:
+    if "plateau" in kr:
+        m = _PLATEAU_RE.search(kr)
+        return KILL_NO_LEARNING, ({"plateau_pct": m.group(1)} if m else {})
+    if (
+        "no improvement" in kr
+        or "no_learn" in kr
+        or "no learning" in kr
+        or "no reward" in kr
+        or "baseline" in kr
+    ):
         return KILL_NO_LEARNING, {}
+    if "timeout" in kr:
+        return KILL_TIMEOUT, {}
     return KILL_UNKNOWN, {}
