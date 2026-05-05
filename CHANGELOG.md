@@ -1,3 +1,9 @@
+## v0.19.2 (2026-05-05)
+
+### Fix
+
+- **ci**: treat cz exit 3 (NO_COMMITS_FOUND) as clean skip (#40)
+
 ## v0.19.1 (2026-05-05)
 
 ### Fix
