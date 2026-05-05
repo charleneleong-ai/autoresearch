@@ -23,6 +23,18 @@ from typing import Any, Final
 # accept both — this list is the canonical fallback order.
 _SCORE_FIELDS: tuple[str, ...] = ("evaluation_score", "score")
 
+# Status code constants. Stable strings so caller code can switch on them
+# without depending on an Enum identity. Both downstream sweeps use these
+# exact values in their `results.jsonl` rows.
+STATUS_BASELINE: Final = "BASELINE"
+STATUS_KEEP: Final = "KEEP"
+STATUS_DISCARD: Final = "DISCARD"
+STATUS_EARLY_KILL: Final = "EARLY_KILL"
+STATUS_CRASH: Final = "CRASH"
+STATUS_RUNNING: Final = "RUNNING"
+
+KEEP_STATUSES: Final[tuple[str, ...]] = (STATUS_KEEP, STATUS_BASELINE)
+
 
 def get_score(row: dict[str, Any], score_field: str | None = None) -> float:
     """Return a row's score, transparently handling the score/evaluation_score alias.
@@ -44,6 +56,89 @@ def filter_by_game(rows: list[dict[str, Any]], game: str | None) -> list[dict[st
     if not game:
         return rows
     return [r for r in rows if r.get("game") == game]
+
+
+# Type alias for project-supplied score extractors passed to ``decide_status``.
+ScoreFn = Callable[[dict[str, Any]], float | None]
+
+
+def decide_status(
+    prior: list[dict[str, Any]],
+    score: float,
+    *,
+    score_fn: ScoreFn | None = None,
+    keep_statuses: tuple[str, ...] = KEEP_STATUSES,
+) -> str:
+    """Classify a new row as BASELINE / KEEP / DISCARD against its history.
+
+    Generalises the inline classifiers in ``gemma4-rlvr`` and
+    ``orak-2025-starter-kit``:
+
+    * No prior row has a ``keep_statuses`` status (KEEP/BASELINE by default)
+      → the new row is the first comparable point and wins ``BASELINE``.
+    * Otherwise compare ``score`` against the best prior comparable score.
+      Strictly better wins ``KEEP``; otherwise ``DISCARD``.
+
+    Doesn't classify EARLY_KILL or CRASH — those are caller-driven overrides
+    (kill happens before scoring, crash bypasses scoring entirely) and the
+    ``SweepRunner`` already handles them via the ``_relabel_target`` path.
+
+    Parameters
+    ----------
+    prior
+        All previously-logged rows for the comparison group (eg. one config,
+        one game). Status field defaults to ``""`` if absent.
+    score
+        The new row's score. Must already be normalised onto the same scale
+        as ``score_fn`` returns.
+    score_fn
+        Per-row score extractor for the prior comparison set. Defaults to
+        :func:`get_score` (handles the ``score`` / ``evaluation_score``
+        alias). Pass a custom callable to compare on a sub-key, eg.::
+
+            decide_status(prior, score, score_fn=lambda r:
+                ((r.get("metrics") or {}).get("heldout") or {}).get("mean_total"))
+
+        Rows where ``score_fn`` returns ``None`` are dropped from the
+        comparison set — keeps stale rows that pre-date a metrics rollout
+        from blocking new rows. If *all* KEEP/BASELINE rows lack a
+        comparable score, returns ``BASELINE`` (treats history as empty).
+    keep_statuses
+        Which statuses count as "in the comparison set". Defaults to
+        ``("KEEP", "BASELINE")``. Override if a project tracks an extra
+        admit status (eg. ``"PROMOTED"``).
+
+    Returns
+    -------
+    str
+        One of :data:`STATUS_BASELINE`, :data:`STATUS_KEEP`, :data:`STATUS_DISCARD`.
+
+    Examples
+    --------
+    >>> decide_status([], 5.0)
+    'BASELINE'
+    >>> decide_status([{"status": "BASELINE", "score": 5.0}], 7.0)
+    'KEEP'
+    >>> decide_status([{"status": "BASELINE", "score": 5.0}], 5.0)
+    'DISCARD'
+    >>> decide_status([{"status": "DISCARD", "score": 99.0}], 1.0)
+    'BASELINE'
+
+    Custom score extractor:
+
+    >>> heldout = lambda r: ((r.get("metrics") or {}).get("heldout") or {}).get("mean_total")
+    >>> prior = [{"status": "KEEP", "score": 1.0, "metrics": {"heldout": {"mean_total": 12.0}}}]
+    >>> decide_status(prior, 13.0, score_fn=heldout)
+    'KEEP'
+    """
+    fn = score_fn or get_score
+    kept = [r for r in prior if r.get("status", "") in keep_statuses]
+    if not kept:
+        return STATUS_BASELINE
+    prior_scores = [s for s in (fn(r) for r in kept) if s is not None]
+    if not prior_scores:
+        return STATUS_BASELINE
+    return STATUS_KEEP if score > max(prior_scores) else STATUS_DISCARD
 
 
 def tag_dir(

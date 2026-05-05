@@ -18,8 +18,22 @@ from autoresearch.current_run import (
     sidecar,
     write_sidecar,
 )
-from autoresearch.gpu_monitor import GPUMonitor, GPUSample, GPUSummary
+from autoresearch.gpu_monitor import (
+    GPUMonitor,
+    GPUSample,
+    GPUSummary,
+    GPUTriage,
+    GPUTriageThresholds,
+)
 from autoresearch.results import (
+    KEEP_STATUSES,
+    STATUS_BASELINE,
+    STATUS_CRASH,
+    STATUS_DISCARD,
+    STATUS_EARLY_KILL,
+    STATUS_KEEP,
+    STATUS_RUNNING,
+    decide_status,
     filter_by_game,
     get_score,
     load_results,
@@ -43,6 +57,8 @@ from autoresearch.retrospective import (
     load_spec as load_retrospective_spec,
 )
 from autoresearch.subprocess_utils import (
+    CrashPattern,
+    crash_reason_from_stdout,
     kill_gracefully,
     wait_with_timeout,
 )
@@ -72,6 +88,15 @@ __all__ = [
     "log_experiment",
     "relabel_last_as_early_kill",
     "tag_dir",
+    # row-status helpers (autoresearch#26)
+    "KEEP_STATUSES",
+    "STATUS_BASELINE",
+    "STATUS_CRASH",
+    "STATUS_DISCARD",
+    "STATUS_EARLY_KILL",
+    "STATUS_KEEP",
+    "STATUS_RUNNING",
+    "decide_status",
     # sweep runner (autoresearch#20 PR 2)
     "IterOutcome",
     "IterPlan",
@@ -86,9 +111,15 @@ __all__ = [
     "sidecar",
     "wait_with_timeout",
     "write_sidecar",
+    # subprocess crash classification (autoresearch#26)
+    "CrashPattern",
+    "crash_reason_from_stdout",
+    # GPU monitoring + triage thresholds (autoresearch#26)
     "GPUMonitor",
     "GPUSample",
     "GPUSummary",
+    "GPUTriage",
+    "GPUTriageThresholds",
     "plot_multi_tag_overlay",
     "plot_cross_game_scoreboard",
     "plot_milestone_progression",
