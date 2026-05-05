@@ -152,6 +152,9 @@ jobs:
           # contain arbitrary commit subjects (including ones that mention
           # cz's own no-bump signals).
           #   0  = bumpable commits found, proceed
+          #   3  = NO_COMMITS_FOUND (zero commits between last tag and HEAD,
+          #        eg. right after the catch-up tag-move re-anchored the
+          #        tag to HEAD) — clean skip
           #   21 = NO_COMMITS_TO_BUMP (only docs:/chore:/style:/test:/ci:
           #        since last tag) — clean skip
           #   anything else = real failure, surface it
@@ -162,9 +165,9 @@ jobs:
               echo "version=$VERSION" >> "$GITHUB_OUTPUT"
               echo "::notice::Bumpable to v$VERSION"
               ;;
-            21)
+            3|21)
               echo "bump=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::No release-worthy commits since last tag — skipping bump."
+              echo "::notice::cz exit $EXIT — no release-worthy commits since last tag, skipping bump."
               ;;
             *)
               echo "::error::cz bump --dry-run failed unexpectedly with exit $EXIT"
