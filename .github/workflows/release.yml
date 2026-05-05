@@ -29,6 +29,10 @@ name: Release
 on:
   push:
     branches: [main]
+  # Manual fire — useful for re-running the catch-up + bump-PR cycle after
+  # fixing a release-related bug, without needing to land an unrelated
+  # feat:/fix: commit just to trigger the push event.
+  workflow_dispatch:
 
 permissions:
   contents: write       # tag push + Release create
