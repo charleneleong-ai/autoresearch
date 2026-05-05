@@ -17,7 +17,11 @@ from autoresearch.results import (
     KILL_NO_LEARNING,
     KILL_POLICY_DIVERGENCE,
     KILL_UNKNOWN,
+    STATUS_BASELINE,
+    STATUS_DISCARD,
+    STATUS_KEEP,
     categorize_kill_reason,
+    decide_status,
     filter_by_game,
     get_score,
     load_results,
@@ -328,6 +332,99 @@ def test_extra_classifier_default_none_keeps_builtin_behaviour() -> None:
     cat, extras = categorize_kill_reason("|kl|=0.5 suggests policy divergence")
     assert cat == KILL_POLICY_DIVERGENCE
     assert extras == {"kl": "0.5"}
+
+
+# ── decide_status ──────────────────────────────────────────────────────
+
+
+def test_decide_status_empty_history_returns_baseline() -> None:
+    assert decide_status([], 5.0) == STATUS_BASELINE
+
+
+def test_decide_status_only_discard_priors_treated_as_empty() -> None:
+    """A history of only DISCARD/EARLY_KILL rows means no comparable baseline
+    has been admitted yet → BASELINE."""
+    prior = [
+        {"status": "DISCARD", "score": 99.0},
+        {"status": "EARLY_KILL", "score": 99.0},
+        {"status": "CRASH", "score": 99.0},
+    ]
+    assert decide_status(prior, 1.0) == STATUS_BASELINE
+
+
+def test_decide_status_keep_when_strictly_better() -> None:
+    prior = [{"status": STATUS_BASELINE, "score": 5.0}]
+    assert decide_status(prior, 5.5) == STATUS_KEEP
+
+
+def test_decide_status_discard_when_equal_or_worse() -> None:
+    """Strict-better only — ties go to DISCARD so the original baseline holds."""
+    prior = [{"status": STATUS_BASELINE, "score": 5.0}]
+    assert decide_status(prior, 5.0) == STATUS_DISCARD
+    assert decide_status(prior, 4.9) == STATUS_DISCARD
+
+
+def test_decide_status_compares_against_max_keep_baseline() -> None:
+    """Mixed KEEP+BASELINE+DISCARD history — only KEEP/BASELINE rows count."""
+    prior = [
+        {"status": STATUS_BASELINE, "score": 5.0},
+        {"status": STATUS_KEEP, "score": 9.0},
+        {"status": STATUS_DISCARD, "score": 100.0},  # ignored — DISCARD
+    ]
+    assert decide_status(prior, 9.5) == STATUS_KEEP
+    assert decide_status(prior, 9.0) == STATUS_DISCARD
+
+
+def test_decide_status_uses_evaluation_score_alias() -> None:
+    """Default ``score_fn=get_score`` falls back to ``evaluation_score`` when
+    ``score`` is absent — matches the orak row schema."""
+    prior = [{"status": STATUS_KEEP, "evaluation_score": 7.0}]
+    assert decide_status(prior, 8.0) == STATUS_KEEP
+
+
+def test_decide_status_custom_score_fn_for_heldout_metrics() -> None:
+    """gemma4-rlvr's apples-to-apples heldout comparison via custom extractor."""
+
+    def heldout(row: dict) -> float | None:
+        return ((row.get("metrics") or {}).get("heldout") or {}).get("mean_total")
+
+    prior = [
+        {"status": STATUS_BASELINE, "score": 1.0, "metrics": {"heldout": {"mean_total": 12.0}}},
+        {"status": STATUS_KEEP, "score": 2.0, "metrics": {"heldout": {"mean_total": 14.0}}},
+    ]
+    # New row scored on the same heldout scale.
+    assert decide_status(prior, 14.5, score_fn=heldout) == STATUS_KEEP
+    assert decide_status(prior, 14.0, score_fn=heldout) == STATUS_DISCARD
+
+
+def test_decide_status_score_fn_returning_none_skips_row() -> None:
+    """When prior KEEP/BASELINE rows have no comparable score, treat as empty
+    history → BASELINE. Stops stale rows from blocking new metric rollouts."""
+
+    def heldout(row: dict) -> float | None:
+        return ((row.get("metrics") or {}).get("heldout") or {}).get("mean_total")
+
+    # Prior row exists and is admitted, but lacks the heldout sub-key.
+    prior = [{"status": STATUS_KEEP, "score": 5.0}]
+    assert decide_status(prior, 1.0, score_fn=heldout) == STATUS_BASELINE
+
+
+def test_decide_status_custom_keep_statuses() -> None:
+    """Project that tracks an extra admit status (eg. PROMOTED)."""
+    prior = [{"status": "PROMOTED", "score": 10.0}]
+    # Default keep_statuses ignores PROMOTED → no comparable history.
+    assert decide_status(prior, 1.0) == STATUS_BASELINE
+    # Override to include PROMOTED.
+    assert (
+        decide_status(prior, 11.0, keep_statuses=(STATUS_KEEP, STATUS_BASELINE, "PROMOTED"))
+        == STATUS_KEEP
+    )
+
+
+def test_decide_status_missing_status_field_treated_as_unkept() -> None:
+    """Defensive — old rows without a ``status`` field are excluded from comparison."""
+    prior = [{"score": 99.0}]  # no status
+    assert decide_status(prior, 1.0) == STATUS_BASELINE
 
 
 if __name__ == "__main__":

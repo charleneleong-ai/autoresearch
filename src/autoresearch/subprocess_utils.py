@@ -11,14 +11,19 @@ escalate after a grace window if it doesn't exit, finally hard-kill
 after a second grace window. Without the escalation ladder, half the
 real-world kills end up with leaked GPU memory or zombie helper
 processes (wandb-core, game servers, etc.).
+
+``crash_reason_from_stdout`` is the matching post-mortem helper: when a
+subprocess exits non-zero (and was not killed by triage), scan its tail
+buffer for a structured failure-mode label.
 """
 
 from __future__ import annotations
 
+import re
 import signal
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 
 def kill_gracefully(
@@ -140,4 +145,118 @@ def wait_with_timeout(
     return proc.returncode if proc.returncode is not None else 0, kill_reason
 
 
-__all__ = ["kill_gracefully", "wait_with_timeout"]
+# ── crash_reason_from_stdout ───────────────────────────────────────────
+
+# (regex, mapper). ``mapper`` is either a literal reason string or a callable
+# that takes the regex match and returns one. First match wins, so order from
+# specific → generic. Patterns are anchored on the most distinctive token of
+# each failure mode rather than the full traceback so they survive ANSI
+# colour codes and progress-bar reflows that often pollute the buffer.
+_BUILTIN_CRASH_PATTERNS: list[tuple[re.Pattern[str], str | Callable[[re.Match[str]], str]]] = [
+    (
+        re.compile(r"torch\.OutOfMemoryError|CUDA out of memory|OutOfMemoryError"),
+        "CUDA OOM",
+    ),
+    (
+        re.compile(r"^Killed\s*$", re.MULTILINE),
+        "killed by host (likely cgroup OOM)",
+    ),
+    (
+        re.compile(r"AssertionError:?\s*(.*)"),
+        lambda m: f"AssertionError: {m.group(1).strip()[:80]}",
+    ),
+    (
+        re.compile(r"RuntimeError:?\s*(.*)"),
+        lambda m: f"RuntimeError: {m.group(1).strip()[:80]}",
+    ),
+    (
+        re.compile(r"ValueError:?\s*(.*)"),
+        lambda m: f"ValueError: {m.group(1).strip()[:80]}",
+    ),
+    (
+        re.compile(r"FileNotFoundError:?\s*(.*)"),
+        lambda m: f"FileNotFoundError: {m.group(1).strip()[:80]}",
+    ),
+    # Generic *Error fallback — runs after named handlers so a more specific
+    # mapper wins when both match.
+    (
+        re.compile(r"^([A-Z][A-Za-z]+Error):?\s*(.*)", re.MULTILINE),
+        lambda m: f"{m.group(1)}: {m.group(2).strip()[:80]}",
+    ),
+]
+
+CrashPattern = tuple[re.Pattern[str], "str | Callable[[re.Match[str]], str]"]
+
+
+def crash_reason_from_stdout(
+    lines: Sequence[str],
+    *,
+    tail: int = 200,
+    extra_patterns: Sequence[CrashPattern] | None = None,
+) -> str:
+    """Infer a one-line crash reason from a subprocess's stdout/stderr buffer.
+
+    Both downstream sweep loops (gemma4-rlvr and orak-2025-starter-kit) had
+    a near-identical helper that scans the tail of a non-zero-exit run for
+    structured failure modes (OOM, host SIGKILL, common Python error classes)
+    so each iter's row gets a meaningful ``crash_reason`` instead of just
+    ``exit_code=-9``.
+
+    Parameters
+    ----------
+    lines
+        Sequence of stdout/stderr lines (newlines optional). Order is preserved.
+        A ``deque`` works too — anything supporting negative slicing.
+    tail
+        How many lines from the end to scan. Defaults to 200 — enough to catch
+        a typical Python traceback without re-reading multi-MB log files.
+    extra_patterns
+        Project-specific ``(regex, mapper)`` pairs to try **before** the
+        builtins. ``mapper`` is either a literal reason string or a callable
+        that receives the regex match and returns one. Lets a project register
+        custom failure modes (eg. wandb 429s, GPU ECC errors, custom exception
+        types) without forking the package.
+
+    Returns
+    -------
+    str
+        A short reason string. Always non-empty — falls back to
+        ``"unknown: <last non-blank line, truncated to 120 chars>"`` or
+        ``"unknown crash"`` if the buffer is empty.
+
+    Examples
+    --------
+    >>> crash_reason_from_stdout(["...", "torch.OutOfMemoryError: CUDA OOM"])
+    'CUDA OOM'
+    >>> crash_reason_from_stdout(["RuntimeError: shape mismatch (2, 3) vs (4, 5)"])
+    'RuntimeError: shape mismatch (2, 3) vs (4, 5)'
+    >>> crash_reason_from_stdout(["everything fine but exit 1"])
+    'unknown: everything fine but exit 1'
+    >>> crash_reason_from_stdout([])
+    'unknown crash'
+
+    Project-specific extension:
+
+    >>> import re
+    >>> wandb_429 = (re.compile(r"wandb 429"), "wandb_throttle")
+    >>> crash_reason_from_stdout(["wandb 429 retry-after=30"], extra_patterns=[wandb_429])
+    'wandb_throttle'
+    """
+    if not lines:
+        return "unknown crash"
+    text = "".join(lines[-tail:])
+    patterns = list(extra_patterns or []) + _BUILTIN_CRASH_PATTERNS
+    for pat, mapper in patterns:
+        m = pat.search(text)
+        if m:
+            return mapper(m) if callable(mapper) else mapper
+    last = next((ln.strip() for ln in reversed(lines) if ln.strip()), "")
+    return f"unknown: {last[:120]}" if last else "unknown crash"
+
+
+__all__ = [
+    "CrashPattern",
+    "crash_reason_from_stdout",
+    "kill_gracefully",
+    "wait_with_timeout",
+]

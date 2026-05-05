@@ -210,3 +210,168 @@ class GPUMonitor:
         for h in s.hints:
             lines.append(f"  • {h}")
         return "\n".join(lines)
+
+
+# ── stateful threshold tracker ────────────────────────────────────────
+
+
+@dataclass
+class GPUTriageThresholds:
+    """Kill-trigger thresholds for an A100-class run.
+
+    Defaults match the CLAUDE.md prescription: hang at <8% util for 5min,
+    wasted-compute at <35% util for 15min, undersized config at peak mem
+    <50% for 30min, all after a 3-min warmup. Override per-workload if
+    your hardware envelope or memory budget differs.
+    """
+
+    grace_s: int = 180
+    hang_util_pct: int = 8
+    hang_window_s: int = 300
+    wasted_util_pct: int = 35
+    wasted_window_s: int = 900
+    undersized_mem_pct: int = 50
+    undersized_window_s: int = 1800
+
+
+class GPUTriage:
+    """Stateful kill-trigger over a stream of :class:`GPUSample` snapshots.
+
+    Caller polls ``nvidia-smi`` (e.g. via :class:`GPUMonitor` or directly)
+    and feeds each sample to :meth:`update`, which returns a ``kill_reason``
+    string when one of the three thresholds latches, or ``None`` to keep
+    going.
+
+    Three independent kill classes — each catches a failure mode the other
+    two would miss:
+
+    * **Hang** — instantaneous util below ``hang_util_pct`` for
+      ``hang_window_s``. Catches deadlocked workloads (DDP allreduce stall,
+      CUDA driver wedge) that a wasted-compute detector wouldn't fire on
+      until much later.
+    * **Wasted compute** — util below ``wasted_util_pct`` for the broader
+      ``wasted_window_s``. Catches sub-35% sustained underuse that's
+      legitimate compute (so the hang detector ignores it) but burns budget
+      at low throughput.
+    * **Undersized config** — *peak* memory (monotonic over the whole run)
+      below ``undersized_mem_pct`` for ``undersized_window_s``. Uses the
+      cumulative peak so a transient eval/checkpoint spike can rescue an
+      otherwise memory-thin config — only fires if no phase ever hit the
+      memory budget.
+
+    All checks honour a startup ``grace_s`` warmup so model load + first
+    eval don't false-trigger.
+
+    Once any kill latches, the same reason is returned indefinitely — the
+    caller is expected to act on the first non-None and stop polling.
+    """
+
+    def __init__(self, thresholds: GPUTriageThresholds | None = None) -> None:
+        self.thresholds = thresholds or GPUTriageThresholds()
+        self._started_at: float | None = None
+        self._hang_since: float | None = None
+        self._wasted_since: float | None = None
+        self._undersized_since: float | None = None
+        self._peak_mem_pct: float = 0.0
+        self._kill_reason: str | None = None
+
+    def update(
+        self,
+        sample: GPUSample,
+        *,
+        now: float | None = None,
+    ) -> str | None:
+        """Feed one GPU sample. Returns a ``kill_reason`` string or ``None``.
+
+        Parameters
+        ----------
+        sample
+            One ``nvidia-smi`` snapshot.
+        now
+            Override the monotonic clock. Defaults to ``time.monotonic()``.
+            Tests pass an explicit value to make the timing windows
+            deterministic.
+        """
+        if self._kill_reason is not None:
+            return self._kill_reason
+
+        ts = time.monotonic() if now is None else now
+        if self._started_at is None:
+            self._started_at = ts
+        if ts - self._started_at < self.thresholds.grace_s:
+            return None
+
+        util = sample.util_pct
+        mem_pct = sample.mem_used_gb / sample.mem_total_gb * 100 if sample.mem_total_gb > 0 else 0.0
+        self._peak_mem_pct = max(self._peak_mem_pct, mem_pct)
+
+        t = self.thresholds
+
+        # ── util-based ladder (hang ⊂ wasted) ──────────────────────────
+        if util < t.hang_util_pct:
+            if self._hang_since is None:
+                self._hang_since = ts
+            elif ts - self._hang_since >= t.hang_window_s:
+                self._kill_reason = (
+                    f"GPU util {util}% < {t.hang_util_pct}% "
+                    f"for {t.hang_window_s // 60}min+ — likely hang"
+                )
+                return self._kill_reason
+            # Hang zone is also wasted-compute zone — start that latch too.
+            if self._wasted_since is None:
+                self._wasted_since = ts
+        elif util < t.wasted_util_pct:
+            self._hang_since = None
+            if self._wasted_since is None:
+                self._wasted_since = ts
+            elif ts - self._wasted_since >= t.wasted_window_s:
+                self._kill_reason = (
+                    f"GPU util sustained <{t.wasted_util_pct}% "
+                    f"for {t.wasted_window_s // 60}min+ — wasted compute "
+                    f"(last sample {util}%, "
+                    f"{sample.mem_used_gb:.0f}/{sample.mem_total_gb:.0f}GB)"
+                )
+                return self._kill_reason
+        else:
+            self._hang_since = None
+            self._wasted_since = None
+
+        # ── undersized (peak-mem-based — uses cumulative peak) ─────────
+        if self._peak_mem_pct < t.undersized_mem_pct:
+            if self._undersized_since is None:
+                self._undersized_since = ts
+            elif ts - self._undersized_since >= t.undersized_window_s:
+                self._kill_reason = (
+                    f"peak GPU mem {self._peak_mem_pct:.0f}% "
+                    f"< {t.undersized_mem_pct}% "
+                    f"for {t.undersized_window_s // 60}min+ — undersized config "
+                    f"({sample.mem_used_gb:.0f}/{sample.mem_total_gb:.0f}GB; "
+                    "try larger batch / num_generations / max_seq_length)"
+                )
+                return self._kill_reason
+        else:
+            self._undersized_since = None
+
+        return None
+
+    @property
+    def peak_mem_pct(self) -> float:
+        """Cumulative peak memory percentage seen so far across all samples."""
+        return self._peak_mem_pct
+
+    @property
+    def kill_reason(self) -> str | None:
+        """The latched kill reason, or ``None`` if no threshold has fired."""
+        return self._kill_reason
+
+
+__all__ = [
+    "DEFAULT_LOW_MEM_PCT",
+    "DEFAULT_LOW_UTIL_PCT",
+    "DEFAULT_POLL_INTERVAL_S",
+    "GPUMonitor",
+    "GPUSample",
+    "GPUSummary",
+    "GPUTriage",
+    "GPUTriageThresholds",
+]
