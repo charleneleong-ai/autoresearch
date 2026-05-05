@@ -1,3 +1,9 @@
+## v0.19.3 (2026-05-05)
+
+### Fix
+
+- **ci**: add workflow_dispatch trigger to release.yml (#42)
+
 ## v0.19.2 (2026-05-05)
 
 ### Fix
