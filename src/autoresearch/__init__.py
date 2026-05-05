@@ -85,6 +85,18 @@ from autoresearch.sweep_runner import (
     SweepRunner,
     TriageMonitor,
 )
+from autoresearch.token_confidence import (
+    ConfidenceSummary,
+    bucket_by_failure,
+    load_per_row_logprobs,
+    plot_confidence_distribution,
+    render_annotated_html,
+    summarize_confidence,
+    write_summary_report,
+)
+from autoresearch.token_confidence import (
+    Sample as TokenConfidenceSample,
+)
 from autoresearch.trajectory import (
     StepRecord,
     TrajectoryWriter,
@@ -169,6 +181,15 @@ __all__ = [
     "normalize_score",
     "register_normalizer",
     "with_retries",
+    # token-confidence diagnostic
+    "ConfidenceSummary",
+    "TokenConfidenceSample",
+    "bucket_by_failure",
+    "load_per_row_logprobs",
+    "plot_confidence_distribution",
+    "render_annotated_html",
+    "summarize_confidence",
+    "write_summary_report",
     # retrospective (autoresearch#16)
     "BUILTIN_DETECTORS",
     "BUILTIN_TRANSFORMS",
