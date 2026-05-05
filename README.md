@@ -3,7 +3,7 @@
 [![Lint](https://github.com/charleneleong-ai/autoresearch/actions/workflows/lint.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/lint.yml)
 [![Test](https://github.com/charleneleong-ai/autoresearch/actions/workflows/test.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/test.yml)
 [![Release](https://github.com/charleneleong-ai/autoresearch/actions/workflows/release.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-v0.19.6-blue)](https://github.com/charleneleong-ai/autoresearch/releases/latest)
+[![Version](https://img.shields.io/badge/version-v0.20.0-blue)](https://github.com/charleneleong-ai/autoresearch/releases/latest)
 
 Self-driving experiment sweep loop — daemon-detached `autoresearch.py` + live PR-updating progress chart. Extracted from a coding-agent research-loop skill and stabilised across multiple ML training projects.
 
@@ -245,45 +245,46 @@ Alpha, personal use. Validated against live multi-month sweeps. Current modules 
 
 ## Releasing — automatic on merge to main
 
-Releases are driven by [commitizen](https://commitizen-tools.github.io/commitizen/) and fire automatically on every merge to `main` whose commits warrant a bump. Three workflows split the work:
+Releases are driven by [commitizen](https://commitizen-tools.github.io/commitizen/) and a two-job `release.yml`. **Never manually edit `pyproject.toml:version`, `__init__.py:__version__`, or `CHANGELOG.md`** — all three are owned by the release pipeline. A `version-guard` check in `lint.yml` enforces this and will fail any PR on a non-`release/v*` branch that touches the version.
 
-- **`lint.yml`** runs pre-commit (ruff check + ruff format + hygiene hooks) on every PR and push to main
-- **`test.yml`** runs pytest on every PR and push to main (gates merge alongside lint)
-- **`release.yml`** runs on push to main and:
-  1. Inspects commits since the last tag — if there's a `feat:` / `fix:` / `BREAKING CHANGE`, decides the semver increment; otherwise exits as a no-op
-  2. `cz bump --yes` — bumps `pyproject.toml:version` + `src/autoresearch/__init__.py:__version__`, prepends a new section to `CHANGELOG.md`, commits as `bump: version X.Y.Z → A.B.C`, creates annotated tag `vA.B.C`
-  3. Pushes the bump commit + tag back to main (loop-protected via `if: !startsWith(commit_message, 'bump:')` so the bump itself doesn't re-trigger)
-  4. Builds wheel + sdist
-  5. Runs `pytest` against the built wheel (catches packaging bugs)
-  6. Creates a GitHub Release with auto-generated notes from PR titles since the previous tag, attaches wheel + sdist
+Three workflows handle CI:
+
+- **`lint.yml`** — pre-commit (ruff check + format + hygiene) on every PR and push to main; also runs `version-guard` on PRs.
+- **`test.yml`** — pytest on every PR and push to main.
+- **`release.yml`** — single job on every push to main:
+
+### `Bump + Publish` job
+
+1. `cz bump --dry-run` inspects commits since the last tag. If there are `feat:`/`fix:` commits, proceeds; otherwise exits cleanly (no-op).
+2. `cz bump --yes` — bumps `pyproject.toml:version`, `__init__.py:__version__`, prepends to `CHANGELOG.md`, commits as `chore: release vX.Y.Z`, and creates the tag.
+3. `git push origin HEAD:main --follow-tags` — lands the bump commit and tag on main in one shot.
+4. Builds wheel + sdist, runs `pytest` against the artifact, publishes GitHub Release.
+
+**Loop prevention**: the bump commit is `chore: release vX.Y.Z` — a `chore:` prefix — so the re-triggered run finds no bump-worthy commits between the new tag and HEAD and exits cleanly.
 
 ### How conventional commits map to semver
 
 | commit prefix | bump | example |
 |---|---|---|
-| `feat:` | MINOR | `feat(daemons): add --poll-s envvar` → 0.0.2 → 0.1.0 |
-| `fix:` | PATCH | `fix(render): handle empty results.jsonl` → 0.0.2 → 0.0.3 |
-| `BREAKING CHANGE:` (or `feat!:`) | MAJOR | (see note below for major_version_zero) |
-| `chore:`, `docs:`, `refactor:`, `test:`, `style:` | no bump | release.yml exits cleanly |
-
-While the package is alpha, `[tool.commitizen] major_version_zero = true` keeps breaking changes at MINOR (so 0.x.y stays under 1.0.0 until we explicitly cut 1.0.0). Drop the flag to enable real MAJOR bumps.
+| `feat:` | MINOR | `feat(trajectory): add format_recent_history` → 0.19.x → 0.20.0 |
+| `fix:` | PATCH | `fix(render): delegate _kill_tag` → 0.19.5 → 0.19.6 |
+| `BREAKING CHANGE:` (or `feat!:`) | MAJOR | (capped at MINOR while `major_version_zero = true`) |
+| `chore:`, `docs:`, `refactor:`, `test:`, `style:` | no bump | bump job skips cleanly |
 
 ### Local commands (mise tasks)
 
 ```bash
-mise run init        # bootstrap .venv + dev deps + commitizen
-mise run test        # pytest
-mise run lint        # ruff
-mise run bump-dry    # preview what cz bump would do (no writes)
-mise run bump        # local bump without push (rarely needed — CI does this)
-mise run release     # bump + push --follow-tags (also rarely — CI does this)
+mise run init      # bootstrap .venv + dev deps + commitizen
+mise run test      # pytest
+mise run lint      # ruff
+mise run bump-dry  # preview what cz bump would do (no writes)
 ```
 
 ### CHANGELOG.md vs auto-release-notes
 
 Both exist by design:
-- **`CHANGELOG.md`** — committed alongside each bump, grouped by Feat / Fix / Refactor / BREAKING CHANGE. The canonical human-readable history; the source of truth.
-- **GitHub release notes** (auto-generated) — link-rich (PR numbers, author handles) and visible on the Releases page. Complements rather than duplicates the CHANGELOG.
+- **`CHANGELOG.md`** — auto-updated by `cz bump --yes` on each release PR, grouped by Feat / Fix / Refactor. The canonical human-readable history.
+- **GitHub release notes** (auto-generated) — link-rich (PR numbers, author handles), visible on the Releases page.
 
 ## License
 
