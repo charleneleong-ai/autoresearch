@@ -234,3 +234,136 @@ def test_unicode_serialises_without_escape(tmp_path: Path) -> None:
     writer.flush_episode(episode_id=0, completed=True, final_score=0, game_name="mario")
     raw = writer.success_path.read_text()
     assert "マリオ" in raw
+
+
+# ── StepRecord outcome fields ──────────────────────────────────────────
+
+
+def test_step_record_info_score_defaults_to_none() -> None:
+    rec = _make_step(1)
+    assert rec.info_score is None
+
+
+def test_step_record_obs_digest_defaults_to_none() -> None:
+    rec = _make_step(1)
+    assert rec.obs_digest is None
+
+
+def test_step_record_accepts_outcome_fields() -> None:
+    rec = StepRecord(
+        step=5,
+        system_prompt=None,
+        user_prompt="u",
+        assistant_output="a",
+        action="x",
+        info_score=3.5,
+        obs_digest="deadbeef",
+    )
+    assert rec.info_score == 3.5
+    assert rec.obs_digest == "deadbeef"
+
+
+# ── TrajectoryWriter.recent ────────────────────────────────────────────
+
+
+def test_recent_returns_last_k(tmp_path: Path) -> None:
+    writer = TrajectoryWriter(tmp_path)
+    for i in range(1, 6):
+        writer.add_step(_make_step(i))
+    last3 = writer.recent(3)
+    assert [r.step for r in last3] == [3, 4, 5]
+
+
+def test_recent_k_larger_than_buffer_returns_all(tmp_path: Path) -> None:
+    writer = TrajectoryWriter(tmp_path)
+    for i in range(1, 4):
+        writer.add_step(_make_step(i))
+    assert len(writer.recent(99)) == 3
+
+
+def test_recent_k_zero_returns_empty(tmp_path: Path) -> None:
+    writer = TrajectoryWriter(tmp_path)
+    writer.add_step(_make_step(1))
+    assert writer.recent(0) == []
+
+
+def test_recent_does_not_mutate_buffer(tmp_path: Path) -> None:
+    writer = TrajectoryWriter(tmp_path)
+    for i in range(1, 4):
+        writer.add_step(_make_step(i))
+    snapshot = writer.recent(2)
+    snapshot.clear()
+    assert len(writer._buffer) == 3  # internal buffer unchanged
+
+
+# ── format_recent_history ─────────────────────────────────────────────
+
+from autoresearch.trajectory import format_recent_history  # noqa: E402
+
+
+def test_format_recent_history_empty() -> None:
+    assert format_recent_history([]) == ""
+
+
+def test_format_recent_history_score_delta_and_state_change() -> None:
+    records = [
+        StepRecord(
+            step=1,
+            system_prompt=None,
+            user_prompt="u",
+            assistant_output="a",
+            action="north",
+            info_score=0.0,
+            obs_digest="aaa",
+        ),
+        StepRecord(
+            step=2,
+            system_prompt=None,
+            user_prompt="u",
+            assistant_output="a",
+            action="north",
+            info_score=0.0,
+            obs_digest="aaa",
+        ),
+        StepRecord(
+            step=3,
+            system_prompt=None,
+            user_prompt="u",
+            assistant_output="a",
+            action="east",
+            info_score=1.0,
+            obs_digest="bbb",
+        ),
+    ]
+    lines = format_recent_history(records).splitlines()
+    assert "state=initial" in lines[0]
+    assert "state=unchanged (loop?)" in lines[1]
+    assert "(+0)" in lines[1]
+    assert "state=changed" in lines[2]
+    assert "(+1)" in lines[2]
+
+
+def test_format_recent_history_missing_score() -> None:
+    records = [
+        StepRecord(step=1, system_prompt=None, user_prompt="u", assistant_output="a", action="x")
+    ]
+    out = format_recent_history(records)
+    assert "score=?" in out
+    assert "state=?" in out
+
+
+def test_format_recent_history_action_truncated_at_60_chars() -> None:
+    records = [
+        StepRecord(
+            step=1,
+            system_prompt=None,
+            user_prompt="u",
+            assistant_output="a",
+            action="z" * 200,
+            info_score=1.0,
+            obs_digest="x",
+        ),
+    ]
+    out = format_recent_history(records)
+    assert "z" * 60 in out
+    assert "z" * 61 not in out

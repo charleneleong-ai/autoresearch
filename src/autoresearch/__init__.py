@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.19.6"
+__version__ = "0.20.0"
 
 from autoresearch.compare import (
     Milestone,
@@ -101,6 +101,7 @@ from autoresearch.trajectory import (
     StepRecord,
     TrajectoryWriter,
     convert_scratchpad_to_think,
+    format_recent_history,
     has_incomplete_scratchpad,
 )
 from autoresearch.verdict import (
@@ -168,6 +169,7 @@ __all__ = [
     # trajectory writer for agentic-RL pipelines
     "StepRecord",
     "TrajectoryWriter",
+    "format_recent_history",
     "convert_scratchpad_to_think",
     "has_incomplete_scratchpad",
     # llm-utils phase 1 — retry / caching / normalisation
