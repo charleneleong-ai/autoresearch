@@ -1,3 +1,9 @@
+## v0.19.6 (2026-05-05)
+
+### Fix
+
+- **render**: delegate _kill_tag to categorize_kill_reason
+
 ## v0.19.5 (2026-05-05)
 
 ### Fix
