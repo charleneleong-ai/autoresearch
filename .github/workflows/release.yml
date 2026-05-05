@@ -2,28 +2,42 @@ name: Release
 
 # Auto-release-on-merge — semver-driven by conventional commits.
 #
-# Runs on every push to main. Commitizen reads the commit log since the
-# previous tag and decides:
-#   feat:           → MINOR bump
-#   fix:            → PATCH bump
-#   BREAKING CHANGE → MAJOR bump (or MINOR while major_version_zero=true)
-#   chore:/docs:/etc → no bump (workflow exits as a no-op)
+# Runs on every push to main and reconciles two release responsibilities:
 #
-# Loop prevention: skips when the head commit is itself a `bump:` commit
-# (the one this workflow just created). Without this, every release would
-# re-trigger the workflow.
+#   1. **Catch-up Release** — if the version in `pyproject.toml` already has
+#      a tag but no GitHub Release (eg. a release PR was merged but the
+#      Release step never fired, or a tag was created manually), build the
+#      wheel/sdist and publish the Release.
+#
+#   2. **Bump PR** — commitizen reads the commit log since the previous tag:
+#        feat:           → MINOR bump
+#        fix:            → PATCH bump
+#        BREAKING CHANGE → MAJOR bump (or MINOR while major_version_zero=true)
+#        chore:/docs:/etc → no bump (skipped)
+#      For bumpable commits the workflow opens a PR (NOT a direct push,
+#      which `main`'s branch protection rejects) and pushes the tag. The
+#      bump PR's CI gates merge; once squashed, the post-merge re-run lands
+#      in step 1 above and publishes the Release.
+#
+# Why two responsibilities in one workflow: both are idempotent and trigger
+# off the same push. Splitting into two `.yml` files would just duplicate
+# the checkout/install steps.
+#
+# Loop prevention: the bump PR's squash-merge commit message is
+# `chore: release vX.Y.Z (#NN)`, which doesn't match cz's bump triggers,
+# so cz's dry-run reports "no commits to bump" and step 2 skips cleanly.
 on:
   push:
     branches: [main]
 
 permissions:
-  contents: write   # bump commit + tag push + Release create
+  contents: write       # tag push + Release create
+  pull-requests: write  # gh pr create for the bump PR
 
 jobs:
   release:
-    name: Auto-bump + build + GitHub Release
+    name: Catch-up Release + Bump PR
     runs-on: ubuntu-latest
-    if: ${{ !startsWith(github.event.head_commit.message, 'bump:') }}
     steps:
       - name: Check out main with full history
         uses: actions/checkout@v4
@@ -47,6 +61,47 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      # ── 1. Catch-up Release: publish a GitHub Release for HEAD's
+      # pyproject version if the tag exists but no Release does. Handles:
+      #   - a manually-merged release-bump PR
+      #   - a manually-pushed tag (eg. cz bump done locally)
+      #   - the first run after switching to PR-based bumps (this PR)
+      - name: Catch up GitHub Release for current pyproject version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PYPROJECT_VERSION=$(grep -E '^version = "[0-9]+\.[0-9]+\.[0-9]+"' pyproject.toml | head -1 | sed -E 's/version = "(.*)"/\1/')
+          TAG="v${PYPROJECT_VERSION}"
+          echo "pyproject reports version=$PYPROJECT_VERSION → expected tag $TAG"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Tag $TAG not present locally — pyproject is ahead of tags. Bump PR step will handle."
+            exit 0
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Tag $TAG already has a GitHub Release — nothing to catch up."
+            exit 0
+          fi
+          echo "::notice::Tag $TAG exists with no Release — building artifacts and publishing."
+          python -m build
+          uv pip install --system pytest
+          uv pip install --system dist/autoresearch-*.whl
+          pytest tests/ -q
+          PRERELEASE_FLAG=""
+          case "$PYPROJECT_VERSION" in
+            *alpha*|*beta*|*rc*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            --verify-tag \
+            $PRERELEASE_FLAG \
+            dist/autoresearch-*.whl dist/autoresearch-*.tar.gz
+
+      # ── 2. Bump PR: detect new feat:/fix: commits since last tag, open
+      # a release-bump PR (push to a branch + tag, then `gh pr create`).
+      # This replaces the previous `git push origin HEAD` to main, which
+      # branch protection rejects with `GH013: Repository rule violations`.
       - name: Decide whether to bump
         id: check
         run: |
@@ -68,11 +123,11 @@ jobs:
               VERSION=$(echo "$PREVIEW" | grep -oE 'tag to create: v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/tag to create: v//')
               echo "bump=true" >> "$GITHUB_OUTPUT"
               echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-              echo "::notice::Releasing v$VERSION"
+              echo "::notice::Bumpable to v$VERSION"
               ;;
             21)
               echo "bump=false" >> "$GITHUB_OUTPUT"
-              echo "::notice::No release-worthy commits since last tag — skipping."
+              echo "::notice::No release-worthy commits since last tag — skipping bump."
               ;;
             *)
               echo "::error::cz bump --dry-run failed unexpectedly with exit $EXIT"
@@ -80,35 +135,49 @@ jobs:
               ;;
           esac
 
-      - name: Bump version + CHANGELOG + tag
+      - name: Skip bump if a release/v* PR is already open
+        id: open_check
         if: steps.check.outputs.bump == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # If a previous run already opened a release PR that hasn't merged
+          # yet, don't open a second one for an even-newer version — the
+          # maintainer should land the in-flight one first. Detect by listing
+          # open PRs whose head ref starts with `release/v`.
+          OPEN=$(gh pr list --state open --json number,headRefName \
+            --jq '[.[] | select(.headRefName | startswith("release/v"))] | length')
+          if [[ "$OPEN" -gt 0 ]]; then
+            echo "::notice::A release/v* PR is already open ($OPEN found) — skipping new bump."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open release-bump PR
+        if: steps.check.outputs.bump == 'true' && steps.open_check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.check.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          BRANCH="release/v${VERSION}"
+          git checkout -b "$BRANCH"
           cz bump --yes
-          git push origin HEAD
-          git push origin --tags
+          git push origin "$BRANCH"
+          # Push the tag too — the catch-up step on the post-merge re-run
+          # will use it to publish the Release. Tag pushes work even on
+          # branch-protected refs because the tag itself isn't ref-protected.
+          git push origin "v${VERSION}"
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: release v${VERSION}" \
+            --body "Auto-bump from [release.yml run](${RUN_URL}).
 
-      - name: Build wheel + sdist (post-bump)
-        if: steps.check.outputs.bump == 'true'
-        run: python -m build
+          - \`cz bump --yes\` produced the bump commit on this branch.
+          - Tag \`v${VERSION}\` already pushed to the remote (points at the bump commit).
+          - **Once this PR squash-merges, \`release.yml\` re-runs on \`main\`, the catch-up step detects the unreleased \`v${VERSION}\` tag, builds the wheel/sdist, and publishes the GitHub Release.**
 
-      - name: Run tests against the built wheel
-        if: steps.check.outputs.bump == 'true'
-        run: |
-          uv pip install --system pytest
-          uv pip install --system dist/autoresearch-*.whl
-          pytest tests/ -q
-
-      - name: Create GitHub Release
-        if: steps.check.outputs.bump == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.check.outputs.version }}
-          # Auto-generated release notes (PR titles + author tags) complement
-          # the human-readable CHANGELOG.md commitizen wrote at bump time.
-          generate_release_notes: true
-          files: |
-            dist/*.whl
-            dist/*.tar.gz
-          fail_on_unmatched_files: true
-          draft: false
-          prerelease: ${{ contains(steps.check.outputs.version, 'alpha') || contains(steps.check.outputs.version, 'beta') || contains(steps.check.outputs.version, 'rc') }}
+          Branch protection on \`main\` requires the standard CI checks (pre-commit + pytest) to pass before merge. If repo-level auto-merge is enabled, this PR will land automatically; otherwise merge manually once green."
