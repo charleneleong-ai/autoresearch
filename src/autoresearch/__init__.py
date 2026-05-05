@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.19.4"
+__version__ = "0.19.5"
 
 from autoresearch.compare import (
     Milestone,

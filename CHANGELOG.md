@@ -1,3 +1,9 @@
+## v0.19.5 (2026-05-05)
+
+### Fix
+
+- **ci**: use RELEASE_PAT when available + correct empty-commit comment (#46)
+
 ## v0.19.4 (2026-05-05)
 
 ### Fix
