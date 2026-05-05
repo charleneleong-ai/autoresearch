@@ -3,7 +3,7 @@
 [![Lint](https://github.com/charleneleong-ai/autoresearch/actions/workflows/lint.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/lint.yml)
 [![Test](https://github.com/charleneleong-ai/autoresearch/actions/workflows/test.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/test.yml)
 [![Release](https://github.com/charleneleong-ai/autoresearch/actions/workflows/release.yml/badge.svg)](https://github.com/charleneleong-ai/autoresearch/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-v0.15.0-blue)](https://github.com/charleneleong-ai/autoresearch/releases/latest)
+[![Version](https://img.shields.io/badge/version-v0.16.0-blue)](https://github.com/charleneleong-ai/autoresearch/releases/latest)
 
 Self-driving experiment sweep loop — daemon-detached `autoresearch.py` + live PR-updating progress chart. Extracted from a coding-agent research-loop skill and stabilised across multiple ML training projects.
 

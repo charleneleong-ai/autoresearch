@@ -1,3 +1,9 @@
+## v0.16.0 (2026-05-05)
+
+### Feat
+
+- **triage**: crash_reason_from_stdout + GPUTriage + decide_status (#30)
+
 ## v0.15.0 (2026-05-05)
 
 ### Feat
