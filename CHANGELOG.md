@@ -1,3 +1,9 @@
+## v0.19.1 (2026-05-05)
+
+### Fix
+
+- **ci**: re-anchor release tag to main HEAD in catch-up step (#38)
+
 ## v0.19.0 (2026-05-05)
 
 ### Feat
