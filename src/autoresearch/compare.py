@@ -223,7 +223,7 @@ def plot_multi_tag_overlay(
         ax.set_ylim(0, max(all_y) * 1.2)
 
     ax.set_xlabel("Iteration #", fontsize=11)
-    ax.set_ylabel("Evaluation Score (higher is better)", fontsize=11)
+    ax.set_ylabel("Evaluation Score — % normalised, 0–100 (higher is better)", fontsize=11)
     if title is None:
         scope = f"{game}" if game else "all games"
         title = f"Sweep comparison — {scope}"
@@ -328,7 +328,7 @@ def plot_cross_game_scoreboard(
         panel_title = (game_titles or {}).get(game, game)
         ax.set_title(panel_title, fontsize=13, fontweight="bold", pad=10)
         if ax is axes[0]:
-            ax.set_ylabel("Best Evaluation Score")
+            ax.set_ylabel("Best Evaluation Score (% normalised, 0–100)")
         ax.grid(True, color="#eee", linewidth=0.7, axis="y", zorder=0)
         ax.set_axisbelow(True)
         ax.set_ylim(0, max_v * 1.25)
