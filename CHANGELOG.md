@@ -1,3 +1,13 @@
+## v0.21.0 (2026-05-08)
+
+### Feat
+
+- **current_run**: pluggable LogFormat presets (default + untimed) (#54)
+
+### Refactor
+
+- lint cleanup + extract C901 helpers (#53)
+
 ## v0.20.0 (2026-05-05)
 
 ### Feat
