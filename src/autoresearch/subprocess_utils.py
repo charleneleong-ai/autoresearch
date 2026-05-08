@@ -19,6 +19,7 @@ buffer for a structured failure-mode label.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import signal
 import subprocess
@@ -86,11 +87,9 @@ def kill_gracefully(
             on_escalation(f"sigterm grace ({sigterm_grace_s}s) expired, escalating to SIGKILL")
 
     proc.kill()
-    try:
+    # SIGKILL not exiting in 5s = kernel-level zombie, nothing more we can do.
+    with contextlib.suppress(subprocess.TimeoutExpired):
         proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        # SIGKILL not exiting in 5s = kernel-level zombie, nothing more we can do.
-        pass
     return proc.returncode if proc.returncode is not None else -signal.SIGKILL
 
 

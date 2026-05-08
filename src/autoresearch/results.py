@@ -202,10 +202,7 @@ def log_experiment(
     Returns the path to the JSONL file written.
     """
     existing = load_results(experiments_dir, tag, config_name)
-    if game is not None:
-        experiment_num = len(filter_by_game(existing, game))
-    else:
-        experiment_num = len(existing)
+    experiment_num = len(filter_by_game(existing, game)) if game is not None else len(existing)
 
     entry: dict[str, Any] = {
         "experiment": experiment_num,
@@ -296,9 +293,12 @@ def relabel_last_as_early_kill(
             entry = json.loads(lines[idx])
         except json.JSONDecodeError:
             continue
-        if filter_field is not None and filter_values is not None:
-            if entry.get(filter_field) not in filter_values:
-                continue
+        if (
+            filter_field is not None
+            and filter_values is not None
+            and entry.get(filter_field) not in filter_values
+        ):
+            continue
         entry["status"] = "EARLY_KILL"
         entry["notes"] = f"KILLED: {kill_reason}. " + str(entry.get("notes", ""))
         lines[idx] = json.dumps(entry)

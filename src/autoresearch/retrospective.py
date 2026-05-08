@@ -280,7 +280,7 @@ def _eval_score_plateau(ctx: IterContext) -> Finding | None:
             f"sat at {plateau_score:.2f} ± {epsilon}. The autoresearch parameter "
             f"proposer is firing (see `notes` field for the deltas) but the "
             f"swept axis isn't budging the metric.\n\n"
-            f"Recent scores: {', '.join(f'{s:.2f}' for s in recent_scores + [cur_score])}\n\n"
+            f"Recent scores: {', '.join(f'{s:.2f}' for s in [*recent_scores, cur_score])}\n\n"
             f"Likely the bottleneck is *outside* the swept hyperparameter — "
             f"capability limit, prompt design, or reward shaping. Stop sweeping "
             f"the same axis and inspect those layers."
@@ -515,6 +515,88 @@ BUILTIN_TRANSFORMS: dict[str, Callable[[float], float]] = {
 }
 
 
+def _resolve_transforms(
+    transforms_kw: Sequence[str | Callable[[float], float]],
+) -> list[tuple[str, Callable[[float], float]]]:
+    """Map `transforms=[...]` entries to `(name, callable)` pairs.
+
+    Accepts registered names (resolved via ``BUILTIN_TRANSFORMS``) or
+    callables (used directly with ``__name__`` or ``"<custom>"`` as label).
+    """
+    resolved: list[tuple[str, Callable[[float], float]]] = []
+    for t in transforms_kw:
+        if isinstance(t, str):
+            if t not in BUILTIN_TRANSFORMS:
+                raise KeyError(
+                    f"Unknown transform {t!r}. Built-in: {sorted(BUILTIN_TRANSFORMS)}. "
+                    f"Pass a callable directly to use a custom transform."
+                )
+            resolved.append((t, BUILTIN_TRANSFORMS[t]))
+        elif callable(t):
+            resolved.append((getattr(t, "__name__", "<custom>"), t))
+        else:
+            raise TypeError(
+                f"transforms entries must be str (registered name) or callable, "
+                f"got {type(t).__name__}"
+            )
+    return resolved
+
+
+def _extract_numeric_fail_pairs(
+    rows: Sequence[dict[str, Any]],
+    cited_field: str,
+    truth_field: str,
+    passed_field: str,
+) -> tuple[list[tuple[float, float]], list[int]]:
+    """Pull (cited, truth) numeric pairs from FAIL rows. Booleans excluded
+    since `isinstance(True, int)` is True. Returns parallel lists."""
+    pairs: list[tuple[float, float]] = []
+    sample_indices: list[int] = []
+    for idx, row in enumerate(rows):
+        if row.get(passed_field) is not False:
+            continue
+        cited = row.get(cited_field)
+        truth = row.get(truth_field)
+        if isinstance(cited, bool) or isinstance(truth, bool):
+            continue
+        if not isinstance(cited, (int, float)) or not isinstance(truth, (int, float)):
+            continue
+        pairs.append((float(cited), float(truth)))
+        sample_indices.append(idx)
+    return pairs, sample_indices
+
+
+def _score_transforms(
+    pairs: Sequence[tuple[float, float]],
+    sample_indices: Sequence[int],
+    resolved: Sequence[tuple[str, Callable[[float], float]]],
+    epsilon: float,
+) -> list[tuple[str, int, list[int]]]:
+    """For each (name, fn), count `fn(truth) ≈ cited` matches across pairs.
+
+    Tolerance is relative (`epsilon`) with a 1e-9 absolute floor for values
+    near zero. Returns `[(name, count, matched_row_indices), ...]`.
+    """
+
+    def matches(cited: float, transformed: float) -> bool:
+        return abs(cited - transformed) <= max(abs(transformed) * epsilon, 1e-9)
+
+    per_transform: list[tuple[str, int, list[int]]] = []
+    for tname, tfn in resolved:
+        count = 0
+        matched_indices: list[int] = []
+        for (cited, truth), idx in zip(pairs, sample_indices, strict=False):
+            try:
+                transformed = tfn(truth)
+            except Exception:
+                continue
+            if matches(cited, transformed):
+                count += 1
+                matched_indices.append(idx)
+        per_transform.append((tname, count, matched_indices))
+    return per_transform
+
+
 def _build_value_transform_detector(
     detector_name: str,
     default_transforms: list[str] | None,
@@ -546,63 +628,14 @@ def _build_value_transform_detector(
         if not transforms_kw:
             return None  # generic detector with no transforms is a no-op
 
-        # Resolve names → callables. Accept callables directly for in-process
-        # use; YAML schedules pass strings.
-        resolved: list[tuple[str, Callable[[float], float]]] = []
-        for t in transforms_kw:
-            if isinstance(t, str):
-                if t not in BUILTIN_TRANSFORMS:
-                    raise KeyError(
-                        f"Unknown transform {t!r}. Built-in: {sorted(BUILTIN_TRANSFORMS)}. "
-                        f"Pass a callable directly to use a custom transform."
-                    )
-                resolved.append((t, BUILTIN_TRANSFORMS[t]))
-            elif callable(t):
-                resolved.append((getattr(t, "__name__", "<custom>"), t))
-            else:
-                raise TypeError(
-                    f"transforms entries must be str (registered name) or callable, "
-                    f"got {type(t).__name__}"
-                )
-
-        # Extract (cited, truth) pairs from FAIL rows where both values are
-        # numeric. Booleans pass `isinstance(_, int)` so explicitly exclude.
-        pairs: list[tuple[float, float]] = []
-        sample_indices: list[int] = []
-        for idx, row in enumerate(rows):
-            if row.get(passed_field) is not False:
-                continue
-            cited = row.get(cited_field)
-            truth = row.get(truth_field)
-            if isinstance(cited, bool) or isinstance(truth, bool):
-                continue
-            if not isinstance(cited, (int, float)) or not isinstance(truth, (int, float)):
-                continue
-            pairs.append((float(cited), float(truth)))
-            sample_indices.append(idx)
-
+        resolved = _resolve_transforms(transforms_kw)
+        pairs, sample_indices = _extract_numeric_fail_pairs(
+            rows, cited_field, truth_field, passed_field
+        )
         if len(pairs) < min_pairs:
             return None
 
-        def matches(cited: float, transformed: float) -> bool:
-            # Relative tolerance with a 1e-9 absolute floor for values near zero.
-            return abs(cited - transformed) <= max(abs(transformed) * epsilon, 1e-9)
-
-        # Per-transform match counts.
-        per_transform: list[tuple[str, int, list[int]]] = []
-        for tname, tfn in resolved:
-            count = 0
-            matched_indices: list[int] = []
-            for (cited, truth), idx in zip(pairs, sample_indices, strict=False):
-                try:
-                    transformed = tfn(truth)
-                except Exception:
-                    continue
-                if matches(cited, transformed):
-                    count += 1
-                    matched_indices.append(idx)
-            per_transform.append((tname, count, matched_indices))
-
+        per_transform = _score_transforms(pairs, sample_indices, resolved, epsilon)
         best_name, best_count, best_indices = max(per_transform, key=lambda r: r[1])
         fraction = best_count / len(pairs)
         if fraction < threshold:
@@ -730,10 +763,7 @@ def format_markdown(findings: Sequence[Finding], iter_id: int | str | None = Non
         if iter_id is not None:
             return f"## E{iter_id} retrospective\n\nNo findings.\n"
         return "No findings.\n"
-    if iter_id is not None:
-        header = f"## E{iter_id} retrospective\n\n"
-    else:
-        header = "## Retrospective\n\n"
+    header = f"## E{iter_id} retrospective\n\n" if iter_id is not None else "## Retrospective\n\n"
     return header + "\n\n".join(f.detail for f in findings) + "\n"
 
 
