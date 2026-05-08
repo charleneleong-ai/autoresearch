@@ -520,6 +520,75 @@ def _to_metric_list(arg: str | Sequence[str] | None) -> list[str]:
     return list(arg)
 
 
+def _resolve_palette(
+    colors: Sequence[str] | None,
+    color: str | None,
+    default: Sequence[str],
+    name: str,
+) -> list[str]:
+    """Pick the per-line color list for primary/secondary axes.
+
+    `colors` (full override) and `color` (single first-line override) are
+    mutually exclusive. Falls back to `default` when neither is set.
+    """
+    if colors is not None and color is not None:
+        raise ValueError(f"pass either {name} or {name}s, not both")
+    if colors is not None:
+        return list(colors)
+    if color is not None:
+        return [color, *default[1:]]
+    return list(default)
+
+
+def _draw_metric_series(
+    ax: Any,
+    keys: Sequence[str],
+    milestones: Sequence[Milestone],
+    xs: Sequence[int],
+    *,
+    palette: Sequence[str],
+    markers: Sequence[str],
+    linestyle: str,
+    linewidth: float,
+    markersize: float,
+    label_suffix: str,
+    handles: list[Any],
+    require_first: bool = False,
+) -> tuple[list[tuple[str, str, Any]], list[tuple[int, float]]]:
+    """Plot one line per metric key onto ``ax``. Returns (drawn_lines, first_valid_xy).
+
+    `drawn_lines` is `[(key, color, line), ...]` for the metrics that had at
+    least one non-None value. `first_valid_xy` is the (x, v) pairs for the
+    first key — used by the caller for inline annotations + last-point
+    highlighting. Raises if `require_first` and the first key has no data.
+    """
+    drawn: list[tuple[str, str, Any]] = []
+    first_valid: list[tuple[int, float]] = []
+    for i, key in enumerate(keys):
+        vals: list[float | None] = [m.metrics.get(key) for m in milestones]
+        valid = [(x, v) for x, v in zip(xs, vals, strict=False) if v is not None]
+        if not valid:
+            if i == 0 and require_first:
+                raise ValueError(f"no milestone has metric {key!r}")
+            continue
+        color = palette[i % len(palette)]
+        marker = markers[i % len(markers)]
+        line = ax.plot(
+            [x for x, _ in valid],
+            [v for _, v in valid],
+            f"{linestyle}{marker}",
+            color=color,
+            linewidth=linewidth,
+            markersize=markersize,
+            label=f"{key} {label_suffix}",
+        )[0]
+        drawn.append((key, color, line))
+        handles.append(line)
+        if i == 0:
+            first_valid = valid
+    return drawn, first_valid
+
+
 def plot_milestone_progression(
     milestones: Sequence[Milestone],
     *,
@@ -603,24 +672,11 @@ def plot_milestone_progression(
     if not primary_keys:
         raise ValueError("primary_metric must be a string or non-empty sequence")
 
-    if primary_colors is not None and primary_color is not None:
-        raise ValueError("pass either primary_color or primary_colors, not both")
-    if secondary_colors is not None and secondary_color is not None:
-        raise ValueError("pass either secondary_color or secondary_colors, not both")
-
-    primary_palette: list[str] = (
-        list(primary_colors)
-        if primary_colors is not None
-        else ([primary_color, *_PRIMARY_PALETTE[1:]] if primary_color else list(_PRIMARY_PALETTE))
+    primary_palette = _resolve_palette(
+        primary_colors, primary_color, _PRIMARY_PALETTE, "primary_color"
     )
-    secondary_palette: list[str] = (
-        list(secondary_colors)
-        if secondary_colors is not None
-        else (
-            [secondary_color, *_SECONDARY_PALETTE[1:]]
-            if secondary_color
-            else list(_SECONDARY_PALETTE)
-        )
+    secondary_palette = _resolve_palette(
+        secondary_colors, secondary_color, _SECONDARY_PALETTE, "secondary_color"
     )
 
     xs = list(range(len(milestones)))
@@ -632,30 +688,20 @@ def plot_milestone_progression(
 
     handles: list[Any] = []
 
-    primary_lines = []
-    first_valid_primary: list[tuple[int, float]] = []
-    for i, key in enumerate(primary_keys):
-        vals: list[float | None] = [m.metrics.get(key) for m in milestones]
-        valid = [(x, v) for x, v in zip(xs, vals, strict=False) if v is not None]
-        if not valid:
-            if i == 0:
-                raise ValueError(f"no milestone has metric {key!r}")
-            continue
-        color = primary_palette[i % len(primary_palette)]
-        marker = _PRIMARY_MARKERS[i % len(_PRIMARY_MARKERS)]
-        line = ax_primary.plot(
-            [x for x, _ in valid],
-            [v for _, v in valid],
-            f"-{marker}",
-            color=color,
-            linewidth=2.2,
-            markersize=7,
-            label=f"{key} (left axis)",
-        )[0]
-        primary_lines.append((key, color, line))
-        handles.append(line)
-        if i == 0:
-            first_valid_primary = valid
+    _, first_valid_primary = _draw_metric_series(
+        ax_primary,
+        primary_keys,
+        milestones,
+        xs,
+        palette=primary_palette,
+        markers=_PRIMARY_MARKERS,
+        linestyle="-",
+        linewidth=2.2,
+        markersize=7,
+        label_suffix="(left axis)",
+        handles=handles,
+        require_first=True,
+    )
 
     if annotate_primary and first_valid_primary:
         annotate_color = primary_palette[0]
@@ -684,26 +730,24 @@ def plot_milestone_progression(
 
     ax_secondary = None
     if secondary_keys:
-        for i, key in enumerate(secondary_keys):
-            vals = [m.metrics.get(key) for m in milestones]
-            valid = [(x, v) for x, v in zip(xs, vals, strict=False) if v is not None]
-            if not valid:
-                continue
-            if ax_secondary is None:
-                ax_secondary = ax_primary.twinx()
-            color = secondary_palette[i % len(secondary_palette)]
-            marker = _SECONDARY_MARKERS[i % len(_SECONDARY_MARKERS)]
-            line = ax_secondary.plot(
-                [x for x, _ in valid],
-                [v for _, v in valid],
-                f"--{marker}",
-                color=color,
-                linewidth=2.0,
-                markersize=6,
-                label=f"{key} (right axis)",
-            )[0]
-            handles.append(line)
-        if ax_secondary is not None:
+        ax_secondary = ax_primary.twinx()
+        drawn, _ = _draw_metric_series(
+            ax_secondary,
+            secondary_keys,
+            milestones,
+            xs,
+            palette=secondary_palette,
+            markers=_SECONDARY_MARKERS,
+            linestyle="--",
+            linewidth=2.0,
+            markersize=6,
+            label_suffix="(right axis)",
+            handles=handles,
+        )
+        if not drawn:
+            ax_secondary.remove()
+            ax_secondary = None
+        else:
             sec_label = secondary_label or (
                 secondary_keys[0] if len(secondary_keys) == 1 else "metrics (right)"
             )

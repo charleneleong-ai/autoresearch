@@ -124,7 +124,7 @@ def _tick(logs_dir: Path, sidecar: Path, results_path: Path, config_name: str | 
         except json.JSONDecodeError:
             pass
     sidecar.write_text(json.dumps(payload, indent=2))
-    wandb_label = wandb_url if wandb_url else "[dim]pending[/dim]"
+    wandb_label = wandb_url or "[dim]pending[/dim]"
     rprint(
         f"\\[current_run] sidecar → iter [bold]{iter_n}/{iter_m}[/bold] "
         f"(E{payload['experiment']}, wandb={wandb_label})"

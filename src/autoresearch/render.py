@@ -181,7 +181,7 @@ def _draw_axis(
     ax.set_ylabel(score_label, fontsize=10)
     ax.grid(True, color="#eee", linewidth=0.7)
     ax.set_axisbelow(True)
-    ax.set_xticks(range(0, n))
+    ax.set_xticks(range(n))
     ax.set_xlim(-0.5, n - 0.5)
     ymin = min(score(r) for r in rows) - 2
     ymax = max(score(r) for r in rows) + 3

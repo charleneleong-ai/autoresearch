@@ -76,7 +76,6 @@ def fetch_history(
         found, etc.) — wraps the underlying exception with context.
     """
     try:
-        import wandb  # noqa: F401  (presence check)
         from wandb.apis.public import Api
     except ImportError as e:
         raise ImportError(
