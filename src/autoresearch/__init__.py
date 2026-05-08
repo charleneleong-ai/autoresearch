@@ -14,6 +14,8 @@ from autoresearch.compare import (
     plot_multi_tag_overlay,
 )
 from autoresearch.current_run import (
+    LOG_FORMATS,
+    LogFormat,
     clear_sidecar,
     sidecar,
     write_sidecar,
@@ -139,6 +141,8 @@ __all__ = [
     "SweepRunner",
     "TriageMonitor",
     # sweep-loop helpers (autoresearch#20 PR 1)
+    "LOG_FORMATS",
+    "LogFormat",
     "clear_sidecar",
     "kill_gracefully",
     "sidecar",

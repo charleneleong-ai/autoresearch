@@ -7,19 +7,32 @@ iteration is currently in flight, so a chart rendered against
 without waiting for the iter to finish.
 
 Behavior:
-- On the most recent `Iter N/M: ...` line with no matching `Iter N/M
-  finished ...` below it → write the sidecar JSON.
-- On `Iter N/M finished ...` → delete the sidecar.
+- Find the most recent iter-start line matching the active log format's
+  `iter_start_re`. If any `iter_done_re` match appears positionally
+  AFTER it, the iter is done — drop the sidecar. Otherwise — write it.
 
 The sidecar payload includes:
   experiment       — index (count of existing results.jsonl rows)
   config_name      — passed through
-  description      — parsed from the `$ ... -d "<desc>" ...` line
+  description      — parsed via the format's `desc_re` if set, else the
+                     iter line's `rest` capture, else `"iter N/M"`
   notes            — same as description (chart compatibility)
-  started_at       — timestamp from the Iter log line
+  started_at       — timestamp from the iter line's `ts` capture (default
+                     format only — omitted for formats without timestamps)
   log_path         — path of the autoresearch log being watched
   iter_marker      — "Iter N/M" string
   wandb_url        — last wandb.ai URL spotted in this iter's log chunk
+
+## Log formats
+
+- `default` — gemma4-style `[YYYY-MM-DDTHH:MM:SSZ] Iter N/M: rest` with
+  per-iter `Iter N/M finished` end markers and `$ ... -d "<desc>" ...`
+  command-line descriptions.
+- `untimed` — orak-style `# Iteration N/M` (no timestamp wrapper) with a
+  sweep-wide `Autoresearch complete after N iterations` end marker and
+  dedicated `Description: <desc>` lines.
+
+Pass via `--log-format` on the CLI.
 
 Designed to run detached (`setsid + nohup + disown`) so it survives
 SSH / coding-agent session death — verify `PPID=1` after launch. Use
@@ -27,7 +40,8 @@ SSH / coding-agent session death — verify `PPID=1` after launch. Use
 buffered.
 
 Usage:
-    autoresearch-current-run --tag <task> [--config <name>] [--logs-dir logs]
+    autoresearch-current-run --tag <task> [--config <name>] \\
+        [--logs-dir logs] [--log-format default|untimed]
 """
 
 from __future__ import annotations
@@ -37,6 +51,7 @@ import re
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -45,9 +60,44 @@ from rich import print as rprint
 
 from autoresearch.results import tag_dir
 
-ITER_START_RE = re.compile(r"\[(?P<ts>[\d\-T:Z]+)\] Iter (?P<n>\d+)/(?P<m>\d+): (?P<rest>.*)")
-ITER_END_RE = re.compile(r"\[[\d\-T:Z]+\] Iter (?P<n>\d+)/(?P<m>\d+) finished")
-DESC_RE = re.compile(r"-d (\[autoresearch [^\]]+\][^-]+?)(?= --|$)")
+
+@dataclass(frozen=True)
+class LogFormat:
+    """Regex patterns for parsing iter starts, completion, and descriptions.
+
+    `iter_start_re` MUST capture named groups `n` and `m`. `ts` and `rest`
+    are optional — `ts` populates `started_at`, `rest` is the description
+    fallback when no `desc_re` is set.
+
+    `iter_done_re` only needs to MATCH positionally after the latest
+    `iter_start_re` match — captures are not used. This lets per-iter
+    end markers (default format) and sweep-wide markers (untimed) share
+    the same dispatch path.
+
+    `desc_re`, when set, is searched in the chunk after the latest
+    iter-start; its `desc` named group becomes the sidecar description.
+    """
+
+    iter_start_re: re.Pattern[str]
+    iter_done_re: re.Pattern[str]
+    desc_re: re.Pattern[str] | None = None
+
+
+LOG_FORMATS: dict[str, LogFormat] = {
+    "default": LogFormat(
+        iter_start_re=re.compile(
+            r"\[(?P<ts>[\d\-T:Z]+)\] Iter (?P<n>\d+)/(?P<m>\d+): (?P<rest>.*)"
+        ),
+        iter_done_re=re.compile(r"\[[\d\-T:Z]+\] Iter \d+/\d+ finished"),
+        desc_re=re.compile(r"-d (?P<desc>\[autoresearch [^\]]+\][^-]+?)(?= --|$)"),
+    ),
+    "untimed": LogFormat(
+        iter_start_re=re.compile(r"#\s*Iteration (?P<n>\d+)/(?P<m>\d+)"),
+        iter_done_re=re.compile(r"Autoresearch complete after \d+ iterations"),
+        desc_re=re.compile(r"Description: (?P<desc>.+)"),
+    ),
+}
+
 WANDB_RE = re.compile(r"https://wandb\.ai/[\w\-./]+/runs/[\w\-]+")
 
 
@@ -64,14 +114,38 @@ def _experiment_count(results_path: Path) -> int:
     return sum(1 for line in results_path.read_text().splitlines() if line.strip())
 
 
-def _tick(logs_dir: Path, sidecar: Path, results_path: Path, config_name: str | None) -> None:
+def _resolve_description(
+    text: str, last: re.Match[str], fmt: LogFormat, iter_n: int, iter_m: int
+) -> str:
+    """Extract description from `text` after the latest iter-start match.
+
+    Tries `fmt.desc_re` first, then the iter line's `rest` capture, then
+    falls back to a generic `iter N/M` label.
+    """
+    if fmt.desc_re is not None:
+        m_desc = fmt.desc_re.search(text, pos=last.end())
+        if m_desc is not None:
+            return m_desc.group("desc").strip()
+    try:
+        rest = last.group("rest")
+    except IndexError:  # `rest` not in pattern — formats may omit it
+        rest = ""
+    return rest.strip() if rest else f"iter {iter_n}/{iter_m}"
+
+
+def _tick(
+    logs_dir: Path,
+    sidecar: Path,
+    results_path: Path,
+    config_name: str | None,
+    fmt: LogFormat,
+) -> None:
     log = _latest_log(logs_dir)
     if log is None:
         return
     text = log.read_text(errors="replace")
 
-    starts = list(ITER_START_RE.finditer(text))
-    ends = {int(m.group("n")) for m in ITER_END_RE.finditer(text)}
+    starts = list(fmt.iter_start_re.finditer(text))
     if not starts:
         return
 
@@ -79,8 +153,9 @@ def _tick(logs_dir: Path, sidecar: Path, results_path: Path, config_name: str | 
     iter_n = int(last.group("n"))
     iter_m = int(last.group("m"))
 
-    if iter_n in ends:
-        # Latest started iter has finished — drop the sidecar.
+    # Iter is done if any done-marker (per-iter or sweep-wide) appears
+    # positionally AFTER the latest iter-start match.
+    if fmt.iter_done_re.search(text, pos=last.end()) is not None:
         if sidecar.exists():
             sidecar.unlink()
             rprint(
@@ -88,33 +163,31 @@ def _tick(logs_dir: Path, sidecar: Path, results_path: Path, config_name: str | 
             )
         return
 
-    # Pull description from the `$ ... -d <desc> --max-steps ...` line that
-    # follows the Iter line.
-    after_iter = text[last.end() :]
-    cmd_line = next((ln for ln in after_iter.splitlines() if ln.startswith("$ ")), "")
-    m_desc = DESC_RE.search(cmd_line)
-    desc = m_desc.group(1).strip() if m_desc else last.group("rest").strip()
+    desc = _resolve_description(text, last, fmt, iter_n, iter_m)
 
     # Wandb URL inside this iter's chunk
     chunk = text[last.start() :]
     urls = WANDB_RE.findall(chunk)
     wandb_url = urls[-1] if urls else ""
 
-    # Iter timestamp from the log line
-    started_at = last.group("ts")
-    if not started_at.endswith("Z") and "+" not in started_at:
-        started_at += "Z"
-
-    payload = {
+    payload: dict[str, Any] = {
         "experiment": _experiment_count(results_path),
         "config_name": config_name or "",
         "description": desc,
         "notes": desc,
-        "started_at": started_at,
         "log_path": str(log),
         "iter_marker": f"Iter {iter_n}/{iter_m}",
         "wandb_url": wandb_url,
     }
+    # Only include `started_at` when the format captures a timestamp.
+    try:
+        started_at = last.group("ts")
+    except IndexError:
+        started_at = None
+    if started_at:
+        if not started_at.endswith("Z") and "+" not in started_at:
+            started_at += "Z"
+        payload["started_at"] = started_at
 
     if sidecar.exists():
         try:
@@ -138,6 +211,15 @@ def main(
     ),
     experiments_dir: Path = typer.Option(Path("experiments"), "--experiments-dir"),
     logs_dir: Path = typer.Option(Path("logs"), "--logs-dir"),
+    log_format: str = typer.Option(
+        "default",
+        "--log-format",
+        help=(
+            "Log format preset: 'default' (timestamped `[ts] Iter N/M: ...` + "
+            "per-iter `Iter N/M finished`) or 'untimed' (orak-style "
+            "`# Iteration N/M` + sweep-wide `Autoresearch complete...`)"
+        ),
+    ),
     poll_s: int = typer.Option(
         15,
         "--poll-s",
@@ -145,6 +227,12 @@ def main(
         help="Seconds between ticks (default 15)",
     ),
 ) -> None:
+    if log_format not in LOG_FORMATS:
+        raise typer.BadParameter(
+            f"unknown --log-format {log_format!r}; choose from {sorted(LOG_FORMATS)}"
+        )
+    fmt = LOG_FORMATS[log_format]
+
     logs_dir = logs_dir.resolve()
     target_dir = tag_dir(experiments_dir, tag, config_name)
     sidecar = target_dir / "current_run.json"
@@ -152,11 +240,11 @@ def main(
 
     rprint(
         f"[bold cyan]\\[current_run][/bold cyan] starting — poll every {poll_s}s\n"
-        f"  logs_dir={logs_dir}  sidecar={sidecar}"
+        f"  logs_dir={logs_dir}  sidecar={sidecar}  log_format={log_format}"
     )
     while True:
         try:
-            _tick(logs_dir, sidecar, results_path, config_name)
+            _tick(logs_dir, sidecar, results_path, config_name, fmt)
         except Exception as e:
             rprint(f"[red]\\[current_run][/red] tick error: {e}")
         time.sleep(poll_s)
