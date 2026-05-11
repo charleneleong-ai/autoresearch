@@ -460,3 +460,68 @@ def categorize_kill_reason(
     if "timeout" in kr:
         return KILL_TIMEOUT, {}
     return KILL_UNKNOWN, {}
+
+
+def consolidate(
+    *,
+    roots: list[Path],
+    output: Path,
+    include_prefixes: list[str] | None = None,
+) -> int:
+    """Aggregate per-sweep ``results.jsonl`` files under ``roots`` into a
+    single ``output`` jsonl index.
+
+    Each row in the output gains a ``_source_path`` field with the
+    originating file path so provenance survives the merge. Symlinks that
+    resolve to the same target are deduplicated (resolved-path basis).
+
+    Args:
+        roots: Root directories to scan. For each root, every
+            ``<root>/<tag>/<config>/results.jsonl`` is included.
+        output: Path of the consolidated jsonl to write.
+        include_prefixes: If set, only tag-dir names starting with one of
+            these prefixes are included. ``None`` = include everything.
+
+    Returns:
+        Number of rows written.
+    """
+    seen_resolved: set[Path] = set()
+    rows_out: list[dict[str, Any]] = []
+
+    for root in roots:
+        if not root.exists():
+            continue
+        for tag_dir_path in sorted(root.iterdir()):
+            if not tag_dir_path.is_dir():
+                continue
+            if include_prefixes and not any(
+                tag_dir_path.name.startswith(p) for p in include_prefixes
+            ):
+                continue
+            for cfg_dir in sorted(tag_dir_path.iterdir()):
+                if not cfg_dir.is_dir():
+                    continue
+                results_path = cfg_dir / "results.jsonl"
+                if not results_path.exists() or results_path.stat().st_size == 0:
+                    continue
+                resolved = results_path.resolve()
+                if resolved in seen_resolved:
+                    continue
+                seen_resolved.add(resolved)
+                rel = str(results_path)
+                for line in results_path.read_text().splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    row["_source_path"] = rel
+                    rows_out.append(row)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w") as f:
+        for r in rows_out:
+            f.write(json.dumps(r) + "\n")
+    return len(rows_out)

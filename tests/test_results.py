@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -456,3 +457,93 @@ def test_decide_status_missing_status_field_treated_as_unkept() -> None:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── consolidate ─────────────────────────────────────────────────────────
+
+
+def _write_jsonl(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as f:
+        import json
+
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+
+
+def test_consolidate_aggregates_multiple_sweep_dirs(tmp_path):
+    """Multiple per-sweep results.jsonl files → single jsonl with
+    all rows + a _source_path field showing where each came from."""
+    from autoresearch.results import consolidate
+
+    _write_jsonl(
+        tmp_path / "pokemon_sweep/gemma_26b/results.jsonl",
+        [
+            {"variant": "stage_a", "game": "pokemon_red", "evaluation_score": 28.57},
+            {"variant": "stage_d", "game": "pokemon_red", "evaluation_score": 57.14},
+        ],
+    )
+    _write_jsonl(
+        tmp_path / "twenty48_sweep/gemma_26b/results.jsonl",
+        [
+            {"variant": "stage_a", "game": "twenty_fourty_eight", "evaluation_score": 54.55},
+        ],
+    )
+    out = tmp_path / "consolidated.jsonl"
+    n = consolidate(roots=[tmp_path], output=out)
+    assert n == 3
+    rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert {r["variant"] for r in rows} == {"stage_a", "stage_d"}
+    assert {r["game"] for r in rows} == {"pokemon_red", "twenty_fourty_eight"}
+    assert all("_source_path" in r for r in rows)
+
+
+def test_consolidate_handles_missing_and_empty_dirs(tmp_path):
+    """Empty dirs / missing results.jsonl are skipped silently."""
+    from autoresearch.results import consolidate
+
+    (tmp_path / "empty_sweep" / "gemma_26b").mkdir(parents=True)
+    _write_jsonl(
+        tmp_path / "real_sweep/gemma_26b/results.jsonl",
+        [{"variant": "x", "game": "g", "evaluation_score": 1.0}],
+    )
+    out = tmp_path / "consolidated.jsonl"
+    n = consolidate(roots=[tmp_path], output=out)
+    assert n == 1
+
+
+def test_consolidate_filters_by_prefix(tmp_path):
+    """include_prefixes keeps only sweep dirs whose name starts with one of the prefixes."""
+    from autoresearch.results import consolidate
+
+    _write_jsonl(
+        tmp_path / "keep_alpha/gemma_26b/results.jsonl",
+        [{"variant": "a", "game": "g", "evaluation_score": 1.0}],
+    )
+    _write_jsonl(
+        tmp_path / "drop_beta/gemma_26b/results.jsonl",
+        [{"variant": "b", "game": "g", "evaluation_score": 2.0}],
+    )
+    out = tmp_path / "consolidated.jsonl"
+    n = consolidate(roots=[tmp_path], output=out, include_prefixes=["keep_"])
+    assert n == 1
+    rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert rows[0]["variant"] == "a"
+
+
+def test_consolidate_dedupes_via_symlinks(tmp_path):
+    """Two dirs pointing at the same physical file (via symlink) count once."""
+    from autoresearch.results import consolidate
+
+    canonical = tmp_path / "canonical/gemma_26b/results.jsonl"
+    _write_jsonl(
+        canonical,
+        [{"variant": "x", "game": "g", "evaluation_score": 1.0}],
+    )
+    shadow = tmp_path / "shadow/gemma_26b"
+    shadow.mkdir(parents=True)
+    (shadow / "results.jsonl").symlink_to(canonical)
+
+    out = tmp_path / "consolidated.jsonl"
+    n = consolidate(roots=[tmp_path], output=out)
+    assert n == 1, "symlinked dupe shouldn't double-count rows"
