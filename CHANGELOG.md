@@ -1,3 +1,9 @@
+## v0.22.0 (2026-05-11)
+
+### Feat
+
+- **consolidate**: single-index scoreboard via consolidate() + scoreboard-from-index (#57)
+
 ## v0.21.0 (2026-05-08)
 
 ### Feat
