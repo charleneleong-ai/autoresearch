@@ -429,3 +429,119 @@ def test_extract_invalid_row_arg(tmp_path: Path) -> None:
     path = _write_jsonl(tmp_path / "results.jsonl", [{"score": 1.0}])
     with pytest.raises(ValueError, match="'last' or 'best'"):
         extract_metrics_from_results_jsonl(path, {"x": "score"}, row="median")
+
+
+# ── scoreboard-from-index ──────────────────────────────────────────────
+
+
+def _write_index(tmp_path: Path, rows: list[dict]) -> Path:
+    """Write a consolidated jsonl index."""
+    import json
+
+    out = tmp_path / "consolidated.jsonl"
+    with out.open("w") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+    return out
+
+
+def test_scoreboard_from_index_writes_png(tmp_path: Path) -> None:
+    """Renders one bar per (game, variant) from a single index file."""
+    from autoresearch.compare import plot_cross_game_scoreboard_from_index
+
+    index = _write_index(
+        tmp_path,
+        [
+            {"variant": "stage_a", "game": "game_x", "evaluation_score": 28.5},
+            {"variant": "stage_d", "game": "game_x", "evaluation_score": 57.1},
+            {"variant": "stage_a", "game": "game_y", "evaluation_score": 54.5},
+            {"variant": "stage_b", "game": "game_y", "evaluation_score": 63.6},
+        ],
+    )
+    out = tmp_path / "scoreboard.png"
+    plot_cross_game_scoreboard_from_index(
+        index_path=index,
+        games_to_variants={
+            "game_x": [("stage_a", "Stage A"), ("stage_d", "Stage D")],
+            "game_y": [("stage_a", "Stage A"), ("stage_b", "Stage B")],
+        },
+        out_path=out,
+    )
+    assert out.exists()
+    assert out.stat().st_size > 1000
+
+
+def test_scoreboard_from_index_takes_best_per_variant(tmp_path: Path) -> None:
+    """When multiple rows share (game, variant), best score wins."""
+    from autoresearch.compare import plot_cross_game_scoreboard_from_index
+
+    index = _write_index(
+        tmp_path,
+        [
+            {"variant": "stage_a", "game": "g", "evaluation_score": 14.29},
+            {"variant": "stage_a", "game": "g", "evaluation_score": 28.57},  # best
+            {"variant": "stage_a", "game": "g", "evaluation_score": 0.0},
+        ],
+    )
+    out = tmp_path / "scoreboard.png"
+    plot_cross_game_scoreboard_from_index(
+        index_path=index,
+        games_to_variants={"g": [("stage_a", "Stage A")]},
+        out_path=out,
+    )
+    assert out.exists()
+
+
+def test_scoreboard_from_index_zero_when_variant_missing(tmp_path: Path) -> None:
+    """Requested (game, variant) not in the index → 0.0 bar, no crash."""
+    from autoresearch.compare import plot_cross_game_scoreboard_from_index
+
+    index = _write_index(tmp_path, [{"variant": "x", "game": "g", "evaluation_score": 1.0}])
+    out = tmp_path / "scoreboard.png"
+    plot_cross_game_scoreboard_from_index(
+        index_path=index,
+        games_to_variants={"g": [("missing", "Missing")]},
+        out_path=out,
+    )
+    assert out.exists()
+
+
+def test_scoreboard_from_index_cli(tmp_path: Path) -> None:
+    """The Typer subcommand is wired with --game/--variant/--label/--sep."""
+    from typer.testing import CliRunner
+
+    from autoresearch.compare import app
+
+    index = _write_index(
+        tmp_path,
+        [
+            {"variant": "stage_a", "game": "g", "evaluation_score": 1.0},
+            {"variant": "stage_b", "game": "g", "evaluation_score": 2.0},
+        ],
+    )
+    out = tmp_path / "scoreboard.png"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "scoreboard-from-index",
+            "--from-file",
+            str(index),
+            "--out",
+            str(out),
+            "--game",
+            "g",
+            "--variant",
+            "stage_a",
+            "--label",
+            "Stage A",
+            "--variant",
+            "stage_b",
+            "--label",
+            "Stage B",
+            "--sep",
+            "2",
+        ],
+    )
+    assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
+    assert out.exists()

@@ -355,6 +355,130 @@ def plot_cross_game_scoreboard(
     return out_path
 
 
+# ── scoreboard-from-index (single canonical results.jsonl) ────────────
+
+
+def _best_score_for_variant(rows: list[dict[str, Any]], *, game: str, variant: str) -> float:
+    """Best score among rows matching both ``game`` and ``variant``."""
+    matching = [r for r in rows if r.get("game") == game and r.get("variant") == variant]
+    return _best_score(matching)
+
+
+def plot_cross_game_scoreboard_from_index(
+    *,
+    index_path: str | Path,
+    games_to_variants: dict[str, list[tuple[str, str]]],
+    out_path: str | Path,
+    title: str | None = None,
+    game_titles: dict[str, str] | None = None,
+    game_verdicts: dict[str, str] | None = None,
+    figsize_per_panel: tuple[float, float] = (5.5, 6.0),
+    dpi: int = 140,
+) -> Path:
+    """Per-game scoreboard reading from a single consolidated index file.
+
+    Same chart as :func:`plot_cross_game_scoreboard`, but the data source
+    is one consolidated ``results.jsonl`` (built by
+    :func:`autoresearch.results.consolidate`) and bars are filtered by
+    ``(game, variant)`` instead of per-tag directory lookups. Use when
+    one chain's ``results.jsonl`` holds many variants you want to render
+    as separate bars — avoids per-variant shadow tag dirs that
+    :func:`plot_cross_game_scoreboard` would require.
+
+    Parameters
+    ----------
+    index_path:
+        Path to the consolidated ``results.jsonl`` (one row per measurement;
+        rows must have ``game`` and ``variant`` fields).
+    games_to_variants:
+        ``{game_name: [(variant, display_label), ...]}``. Each game is a
+        panel; each ``(variant, label)`` pair is a bar. The bar value is
+        the max ``evaluation_score`` for rows matching ``(game, variant)``.
+        Missing variants render as 0.0 bars rather than raising.
+
+    Returns
+    -------
+    Path
+        The output PNG path.
+    """
+    index_path = Path(index_path)
+    rows = [json.loads(line) for line in index_path.read_text().splitlines() if line.strip()]
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    n_games = len(games_to_variants)
+    fig, axes = plt.subplots(
+        1,
+        n_games,
+        figsize=(figsize_per_panel[0] * n_games, figsize_per_panel[1]),
+        dpi=dpi,
+    )
+    if n_games == 1:
+        axes = [axes]
+    fig.patch.set_facecolor("white")
+
+    palette = ["#888", "#1f77b4", "#ff7f0e", "#9467bd", "#2ca02c", "#d62728"]
+
+    for ax, (game, sweeps) in zip(axes, games_to_variants.items(), strict=False):
+        labels = [s[1] for s in sweeps]
+        values = [_best_score_for_variant(rows, game=game, variant=s[0]) for s in sweeps]
+        n = len(labels)
+        colors = [palette[i % len(palette)] for i in range(n)]
+        bars = ax.bar(range(n), values, color=colors, edgecolor="white", linewidth=2, zorder=3)
+
+        if any(v > 0 for v in values):
+            best_idx = max(range(n), key=lambda i: values[i])
+            bars[best_idx].set_edgecolor("#2ca02c")
+            bars[best_idx].set_linewidth(3)
+        else:
+            best_idx = -1
+
+        max_v = max(values) if any(v > 0 for v in values) else 1
+        for i, v in enumerate(values):
+            ax.text(
+                i,
+                v + max_v * 0.02,
+                f"{v:.2f}",
+                ha="center",
+                va="bottom",
+                fontsize=11,
+                fontweight="bold" if i == best_idx else "normal",
+                color="#2ca02c" if i == best_idx else "#333",
+            )
+
+        ax.set_xticks(range(n))
+        ax.set_xticklabels(labels, rotation=20, ha="right", fontsize=9)
+        panel_title = (game_titles or {}).get(game, game)
+        ax.set_title(panel_title, fontsize=13, fontweight="bold", pad=10)
+        if ax is axes[0]:
+            ax.set_ylabel("Best Evaluation Score (% normalised, 0–100)")
+        ax.grid(True, color="#eee", linewidth=0.7, axis="y", zorder=0)
+        ax.set_axisbelow(True)
+        ax.set_ylim(0, max_v * 1.25)
+
+        verdict = (game_verdicts or {}).get(game)
+        if verdict:
+            ax.text(
+                0.5,
+                -0.32,
+                verdict,
+                transform=ax.transAxes,
+                ha="center",
+                va="top",
+                fontsize=10,
+                fontweight="bold",
+            )
+
+    if title:
+        fig.suptitle(title, fontsize=13, color="#222", y=1.02)
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=dpi, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
 # ── milestone progression ──────────────────────────────────────────────
 
 
@@ -883,6 +1007,60 @@ def scoreboard(
         games_to_sweeps=games_to_sweeps,
         experiments_dir=experiments_dir,
         config_name=config_name,
+        out_path=out,
+        title=title,
+    )
+    typer.echo(f"wrote {p}")
+
+
+@app.command("scoreboard-from-index")
+def scoreboard_from_index_cli(
+    from_file: str = typer.Option(..., help="Path to the consolidated results.jsonl"),
+    out: str = typer.Option(..., help="Output PNG path"),
+    game: list[str] = typer.Option(..., "--game", "-g", help="Game name (repeat per panel)"),
+    variant: list[str] = typer.Option(
+        ...,
+        "--variant",
+        "-v",
+        help="Variant to render as one bar (matched against the 'variant' field). "
+        "Repeat per bar; interleave with --label/--sep per game.",
+    ),
+    label: list[str] = typer.Option(..., "--label", "-l", help="Display label per variant"),
+    sep: list[int] = typer.Option(
+        ...,
+        help="Number of (variant, label) pairs per game — must sum to len(variant)",
+    ),
+    title: str | None = typer.Option(None, help="Top-level title"),
+) -> None:
+    """Cross-game scoreboard from a single consolidated index file.
+
+    Unlike ``scoreboard``, this command doesn't need one tag-dir per bar —
+    it reads from a single ``--from-file`` and filters by ``(game, variant)``
+    to produce each bar. Build the index with
+    ``python -m autoresearch.results.consolidate ...`` (or call
+    :func:`autoresearch.results.consolidate` programmatically).
+    """
+    if sum(sep) != len(variant) or len(variant) != len(label):
+        raise typer.BadParameter(
+            f"--sep ({sep}, sum={sum(sep)}) must add up to len(variant)={len(variant)} "
+            f"== len(label)={len(label)}"
+        )
+    if len(sep) != len(game):
+        raise typer.BadParameter(
+            f"--sep entries ({len(sep)}) must match --game entries ({len(game)})"
+        )
+
+    games_to_variants: dict[str, list[tuple[str, str]]] = {}
+    cursor = 0
+    for g, n in zip(game, sep, strict=False):
+        games_to_variants[g] = list(
+            zip(variant[cursor : cursor + n], label[cursor : cursor + n], strict=False)
+        )
+        cursor += n
+
+    p = plot_cross_game_scoreboard_from_index(
+        index_path=from_file,
+        games_to_variants=games_to_variants,
         out_path=out,
         title=title,
     )
