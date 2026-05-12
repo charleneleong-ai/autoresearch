@@ -465,8 +465,6 @@ if __name__ == "__main__":
 def _write_jsonl(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
-        import json
-
         for r in rows:
             f.write(json.dumps(r) + "\n")
 
@@ -547,3 +545,57 @@ def test_consolidate_dedupes_via_symlinks(tmp_path):
     out = tmp_path / "consolidated.jsonl"
     n = consolidate(roots=[tmp_path], output=out)
     assert n == 1, "symlinked dupe shouldn't double-count rows"
+
+
+def test_consolidate_source_path_is_absolute(tmp_path):
+    """`_source_path` must be a resolved absolute path, not CWD-dependent."""
+    from autoresearch.results import consolidate
+
+    _write_jsonl(
+        tmp_path / "s/c/results.jsonl",
+        [{"variant": "x", "game": "g", "evaluation_score": 1.0}],
+    )
+    out = tmp_path / "consolidated.jsonl"
+    consolidate(roots=[tmp_path], output=out)
+    rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    src = Path(rows[0]["_source_path"])
+    assert src.is_absolute()
+    assert src.exists()
+
+
+def test_consolidate_supports_flat_layout(tmp_path):
+    """Flat-layout `<root>/<tag>/results.jsonl` (no per-config subdir) is included."""
+    from autoresearch.results import consolidate
+
+    _write_jsonl(
+        tmp_path / "flat_sweep/results.jsonl",  # no per-config layer
+        [{"variant": "a", "game": "g", "evaluation_score": 1.0}],
+    )
+    _write_jsonl(
+        tmp_path / "nested_sweep/gemma/results.jsonl",
+        [{"variant": "b", "game": "g", "evaluation_score": 2.0}],
+    )
+    out = tmp_path / "consolidated.jsonl"
+    n = consolidate(roots=[tmp_path], output=out)
+    assert n == 2
+    rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert {r["variant"] for r in rows} == {"a", "b"}
+
+
+# ── read_jsonl ──────────────────────────────────────────────────────────
+
+
+def test_read_jsonl_returns_empty_for_missing_path(tmp_path):
+    from autoresearch.results import read_jsonl
+
+    assert read_jsonl(None) == []
+    assert read_jsonl(tmp_path / "nope.jsonl") == []
+
+
+def test_read_jsonl_skips_blanks_and_corrupt_lines(tmp_path):
+    from autoresearch.results import read_jsonl
+
+    p = tmp_path / "results.jsonl"
+    p.write_text('{"a": 1}\n\nnot json\n{"a": 2}\n')
+    rows = read_jsonl(p)
+    assert rows == [{"a": 1}, {"a": 2}]

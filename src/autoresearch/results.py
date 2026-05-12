@@ -141,6 +141,30 @@ def decide_status(
     return STATUS_KEEP if score > max(prior_scores) else STATUS_DISCARD
 
 
+def read_jsonl(path: Path | str | None) -> list[dict[str, Any]]:
+    """Read a JSONL file into a list of dicts.
+
+    Returns ``[]`` for ``None`` or missing paths. Blank lines and lines that
+    fail to parse as JSON are skipped silently — autoresearch JSONLs are
+    append-only and can be truncated mid-write by a crashed process.
+    """
+    if path is None:
+        return []
+    p = Path(path)
+    if not p.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    for line in p.read_text(errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
 def tag_dir(
     experiments_dir: str | Path,
     tag: str | None = None,
@@ -170,10 +194,7 @@ def load_results(
 
     Returns an empty list if the file doesn't exist yet.
     """
-    results_file = tag_dir(experiments_dir, tag, config_name) / "results.jsonl"
-    if not results_file.exists():
-        return []
-    return [json.loads(line) for line in results_file.read_text().splitlines() if line.strip()]
+    return read_jsonl(tag_dir(experiments_dir, tag, config_name) / "results.jsonl")
 
 
 def log_experiment(
@@ -462,31 +483,27 @@ def categorize_kill_reason(
     return KILL_UNKNOWN, {}
 
 
-def consolidate(
-    *,
+def _iter_results_files(
     roots: list[Path],
-    output: Path,
-    include_prefixes: list[str] | None = None,
-) -> int:
-    """Aggregate per-sweep ``results.jsonl`` files under ``roots`` into a
-    single ``output`` jsonl index.
+    include_prefixes: list[str] | None,
+) -> list[Path]:
+    """Yield deduped `results.jsonl` paths under ``roots`` for both
+    flat (`<root>/<tag>/results.jsonl`) and per-config
+    (`<root>/<tag>/<config>/results.jsonl`) layouts.
 
-    Each row in the output gains a ``_source_path`` field with the
-    originating file path so provenance survives the merge. Symlinks that
-    resolve to the same target are deduplicated (resolved-path basis).
-
-    Args:
-        roots: Root directories to scan. For each root, every
-            ``<root>/<tag>/<config>/results.jsonl`` is included.
-        output: Path of the consolidated jsonl to write.
-        include_prefixes: If set, only tag-dir names starting with one of
-            these prefixes are included. ``None`` = include everything.
-
-    Returns:
-        Number of rows written.
+    Symlinks that resolve to the same target are returned once.
     """
     seen_resolved: set[Path] = set()
-    rows_out: list[dict[str, Any]] = []
+    out: list[Path] = []
+
+    def _maybe_add(p: Path) -> None:
+        if not p.exists() or p.stat().st_size == 0:
+            return
+        resolved = p.resolve()
+        if resolved in seen_resolved:
+            return
+        seen_resolved.add(resolved)
+        out.append(p)
 
     for root in roots:
         if not root.exists():
@@ -498,27 +515,44 @@ def consolidate(
                 tag_dir_path.name.startswith(p) for p in include_prefixes
             ):
                 continue
+            _maybe_add(tag_dir_path / "results.jsonl")
             for cfg_dir in sorted(tag_dir_path.iterdir()):
-                if not cfg_dir.is_dir():
-                    continue
-                results_path = cfg_dir / "results.jsonl"
-                if not results_path.exists() or results_path.stat().st_size == 0:
-                    continue
-                resolved = results_path.resolve()
-                if resolved in seen_resolved:
-                    continue
-                seen_resolved.add(resolved)
-                rel = str(results_path)
-                for line in results_path.read_text().splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        row = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    row["_source_path"] = rel
-                    rows_out.append(row)
+                if cfg_dir.is_dir():
+                    _maybe_add(cfg_dir / "results.jsonl")
+    return out
+
+
+def consolidate(
+    *,
+    roots: list[Path],
+    output: Path,
+    include_prefixes: list[str] | None = None,
+) -> int:
+    """Aggregate per-sweep ``results.jsonl`` files under ``roots`` into a
+    single ``output`` jsonl index.
+
+    Each row in the output gains a ``_source_path`` field with the resolved
+    absolute path of the originating file so provenance survives the merge
+    and is CWD-independent. Symlinks that resolve to the same target are
+    deduplicated.
+
+    Args:
+        roots: Root directories to scan. For each root, both flat
+            ``<root>/<tag>/results.jsonl`` and per-config
+            ``<root>/<tag>/<config>/results.jsonl`` layouts are included.
+        output: Path of the consolidated jsonl to write.
+        include_prefixes: If set, only tag-dir names starting with one of
+            these prefixes are included. ``None`` = include everything.
+
+    Returns:
+        Number of rows written.
+    """
+    rows_out: list[dict[str, Any]] = []
+    for results_path in _iter_results_files(roots, include_prefixes):
+        source = str(results_path.resolve())
+        for row in read_jsonl(results_path):
+            row["_source_path"] = source
+            rows_out.append(row)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w") as f:

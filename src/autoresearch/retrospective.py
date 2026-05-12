@@ -54,7 +54,7 @@ import typer
 import yaml
 from rich import print as rprint
 
-from autoresearch.results import get_score
+from autoresearch.results import get_score, read_jsonl
 
 Severity = Literal["info", "warn", "block"]
 SEVERITY_ORDER: dict[Severity, int] = {"info": 0, "warn": 1, "block": 2}
@@ -118,21 +118,6 @@ def _read_log_lines(log_path: Path | None) -> list[str]:
         return log_path.read_text(errors="replace").splitlines()
     except OSError:
         return []
-
-
-def _read_jsonl(path: Path | None) -> list[dict[str, Any]]:
-    if path is None or not path.exists():
-        return []
-    out: list[dict[str, Any]] = []
-    for line in path.read_text(errors="replace").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            out.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return out
 
 
 def _detector_kwargs(ctx: IterContext, detector_name: str) -> dict[str, Any]:
@@ -310,7 +295,7 @@ def _bucketed_failure(ctx: IterContext) -> Finding | None:
     * ``min_failures`` (int, default 5) — require at least this many failure
       rows before firing (avoid noise on tiny eval sets).
     """
-    rows = _read_jsonl(ctx.per_row_jsonl_path)
+    rows = read_jsonl(ctx.per_row_jsonl_path)
     if not rows:
         return None
 
@@ -613,7 +598,7 @@ def _build_value_transform_detector(
     """
 
     def fn(ctx: IterContext) -> Finding | None:
-        rows = _read_jsonl(ctx.per_row_jsonl_path)
+        rows = read_jsonl(ctx.per_row_jsonl_path)
         if not rows:
             return None
 

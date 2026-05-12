@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from autoresearch.compare import (
     Milestone,
+    _best_score_for_variant,
+    app,
     append_milestone,
     extract_metrics_from_results_jsonl,
     load_milestones_yaml,
     plot_cross_game_scoreboard,
+    plot_cross_game_scoreboard_from_index,
     plot_milestone_progression,
     plot_multi_tag_overlay,
 )
@@ -366,9 +371,7 @@ def test_progression_mutual_exclusion_color_vs_colors(tmp_path: Path) -> None:
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> Path:
-    import json as _json
-
-    path.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     return path
 
 
@@ -436,19 +439,13 @@ def test_extract_invalid_row_arg(tmp_path: Path) -> None:
 
 def _write_index(tmp_path: Path, rows: list[dict]) -> Path:
     """Write a consolidated jsonl index."""
-    import json
-
     out = tmp_path / "consolidated.jsonl"
-    with out.open("w") as f:
-        for r in rows:
-            f.write(json.dumps(r) + "\n")
+    out.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     return out
 
 
 def test_scoreboard_from_index_writes_png(tmp_path: Path) -> None:
     """Renders one bar per (game, variant) from a single index file."""
-    from autoresearch.compare import plot_cross_game_scoreboard_from_index
-
     index = _write_index(
         tmp_path,
         [
@@ -471,31 +468,26 @@ def test_scoreboard_from_index_writes_png(tmp_path: Path) -> None:
     assert out.stat().st_size > 1000
 
 
-def test_scoreboard_from_index_takes_best_per_variant(tmp_path: Path) -> None:
-    """When multiple rows share (game, variant), best score wins."""
-    from autoresearch.compare import plot_cross_game_scoreboard_from_index
+def test_best_score_for_variant_returns_max() -> None:
+    """`_best_score_for_variant` picks the largest score across matching rows."""
+    rows = [
+        {"variant": "stage_a", "game": "g", "evaluation_score": 14.29},
+        {"variant": "stage_a", "game": "g", "evaluation_score": 28.57},  # best
+        {"variant": "stage_a", "game": "g", "evaluation_score": 0.0},
+        {"variant": "stage_b", "game": "g", "evaluation_score": 99.0},  # wrong variant
+        {"variant": "stage_a", "game": "other", "evaluation_score": 99.0},  # wrong game
+    ]
+    assert _best_score_for_variant(rows, game="g", variant="stage_a") == 28.57
 
-    index = _write_index(
-        tmp_path,
-        [
-            {"variant": "stage_a", "game": "g", "evaluation_score": 14.29},
-            {"variant": "stage_a", "game": "g", "evaluation_score": 28.57},  # best
-            {"variant": "stage_a", "game": "g", "evaluation_score": 0.0},
-        ],
-    )
-    out = tmp_path / "scoreboard.png"
-    plot_cross_game_scoreboard_from_index(
-        index_path=index,
-        games_to_variants={"g": [("stage_a", "Stage A")]},
-        out_path=out,
-    )
-    assert out.exists()
+
+def test_best_score_for_variant_missing_returns_zero() -> None:
+    """No matching rows → 0.0 (not a crash, not NaN)."""
+    rows = [{"variant": "x", "game": "g", "evaluation_score": 1.0}]
+    assert _best_score_for_variant(rows, game="g", variant="missing") == 0.0
 
 
 def test_scoreboard_from_index_zero_when_variant_missing(tmp_path: Path) -> None:
     """Requested (game, variant) not in the index → 0.0 bar, no crash."""
-    from autoresearch.compare import plot_cross_game_scoreboard_from_index
-
     index = _write_index(tmp_path, [{"variant": "x", "game": "g", "evaluation_score": 1.0}])
     out = tmp_path / "scoreboard.png"
     plot_cross_game_scoreboard_from_index(
@@ -508,10 +500,6 @@ def test_scoreboard_from_index_zero_when_variant_missing(tmp_path: Path) -> None
 
 def test_scoreboard_from_index_cli(tmp_path: Path) -> None:
     """The Typer subcommand is wired with --game/--variant/--label/--sep."""
-    from typer.testing import CliRunner
-
-    from autoresearch.compare import app
-
     index = _write_index(
         tmp_path,
         [
