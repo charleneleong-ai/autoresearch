@@ -272,63 +272,65 @@ def _render_scoreboard_panels(
         axes = [axes]
     fig.patch.set_facecolor("white")
 
-    for ax, (game, bars_in) in zip(axes, games_to_bars.items(), strict=False):
-        labels = [b[0] for b in bars_in]
-        values = [b[1] for b in bars_in]
-        n = len(labels)
-        colors = [_SCOREBOARD_PALETTE[i % len(_SCOREBOARD_PALETTE)] for i in range(n)]
-        bars = ax.bar(range(n), values, color=colors, edgecolor="white", linewidth=2, zorder=3)
+    try:
+        for ax, (game, bars_in) in zip(axes, games_to_bars.items(), strict=True):
+            labels = [b[0] for b in bars_in]
+            values = [b[1] for b in bars_in]
+            n = len(labels)
+            colors = [_SCOREBOARD_PALETTE[i % len(_SCOREBOARD_PALETTE)] for i in range(n)]
+            bars = ax.bar(range(n), values, color=colors, edgecolor="white", linewidth=2, zorder=3)
 
-        if any(v > 0 for v in values):
-            best_idx = max(range(n), key=lambda i: values[i])
-            bars[best_idx].set_edgecolor("#2ca02c")
-            bars[best_idx].set_linewidth(3)
-            max_v = max(values)
-        else:
-            best_idx = -1
-            max_v = 1.0
+            if any(v > 0 for v in values):
+                best_idx = max(range(n), key=lambda i: values[i])
+                bars[best_idx].set_edgecolor("#2ca02c")
+                bars[best_idx].set_linewidth(3)
+                max_v = max(values)
+            else:
+                best_idx = -1
+                max_v = 1.0
 
-        for i, v in enumerate(values):
-            ax.text(
-                i,
-                v + max_v * 0.02,
-                f"{v:.2f}",
-                ha="center",
-                va="bottom",
-                fontsize=11,
-                fontweight="bold" if i == best_idx else "normal",
-                color="#2ca02c" if i == best_idx else "#333",
-            )
+            for i, v in enumerate(values):
+                ax.text(
+                    i,
+                    v + max_v * 0.02,
+                    f"{v:.2f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=11,
+                    fontweight="bold" if i == best_idx else "normal",
+                    color="#2ca02c" if i == best_idx else "#333",
+                )
 
-        ax.set_xticks(range(n))
-        ax.set_xticklabels(labels, rotation=20, ha="right", fontsize=9)
-        panel_title = (game_titles or {}).get(game, game)
-        ax.set_title(panel_title, fontsize=13, fontweight="bold", pad=10)
-        if ax is axes[0]:
-            ax.set_ylabel("Best Evaluation Score (% normalised, 0–100)")
-        ax.grid(True, color="#eee", linewidth=0.7, axis="y", zorder=0)
-        ax.set_axisbelow(True)
-        ax.set_ylim(0, max_v * 1.25)
+            ax.set_xticks(range(n))
+            ax.set_xticklabels(labels, rotation=20, ha="right", fontsize=9)
+            panel_title = (game_titles or {}).get(game, game)
+            ax.set_title(panel_title, fontsize=13, fontweight="bold", pad=10)
+            if ax is axes[0]:
+                ax.set_ylabel("Best Evaluation Score (% normalised, 0–100)")
+            ax.grid(True, color="#eee", linewidth=0.7, axis="y", zorder=0)
+            ax.set_axisbelow(True)
+            ax.set_ylim(0, max_v * 1.25)
 
-        verdict = (game_verdicts or {}).get(game)
-        if verdict:
-            ax.text(
-                0.5,
-                -0.32,
-                verdict,
-                transform=ax.transAxes,
-                ha="center",
-                va="top",
-                fontsize=10,
-                fontweight="bold",
-            )
+            verdict = (game_verdicts or {}).get(game)
+            if verdict:
+                ax.text(
+                    0.5,
+                    -0.32,
+                    verdict,
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="top",
+                    fontsize=10,
+                    fontweight="bold",
+                )
 
-    if title:
-        fig.suptitle(title, fontsize=13, color="#222", y=1.02)
+        if title:
+            fig.suptitle(title, fontsize=13, color="#222", y=1.02)
 
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=dpi, facecolor="white", bbox_inches="tight")
-    plt.close(fig)
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=dpi, facecolor="white", bbox_inches="tight")
+    finally:
+        plt.close(fig)
     return out_path
 
 
