@@ -199,6 +199,9 @@ autoresearch-compare append-milestone \
 # Render the trajectory chart from the same YAML.
 # `primary_metric` / `secondary_metric` accept either a scalar or a list
 # (stacks multiple lines on the same axis — see examples/milestones.stacked.example.yaml).
+# Per-point error bars: a metric value can be `{mean: ..., std: ...}` instead
+# of a scalar — bare markers stay clean for deterministic/n=1 stages
+# (see examples/milestones.errorbars.example.yaml).
 autoresearch-compare progression \
   --milestones-yaml docs/experiments/<task>/milestones.yaml \
   --out milestones.png
