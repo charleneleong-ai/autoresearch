@@ -1,3 +1,9 @@
+## v0.23.1 (2026-05-16)
+
+### Fix
+
+- **release**: use annotated tags so --follow-tags pushes them (#63)
+
 ## v0.23.0 (2026-05-16)
 
 ### Feat
