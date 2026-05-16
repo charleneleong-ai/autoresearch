@@ -66,7 +66,7 @@ Python::
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -465,11 +465,19 @@ class Milestone:
     Hand-authored from doc verdicts — these are the ``mean_total`` /
     ``no_halluc`` numbers you copy out of n=1000 A/B tables, not data
     pulled from a sweep's ``results.jsonl``.
+
+    ``metric_stds`` is optional per-metric standard deviation. When a key
+    appears in both ``metrics`` and ``metric_stds``,
+    :func:`plot_milestone_progression` renders an error bar of
+    ``mean ± std`` at that point. Milestones without a std for a given
+    metric draw as bare markers (no whisker), so you can mix n=1 and
+    n>1 milestones on the same chart.
     """
 
     label: str
     metrics: dict[str, float]
     description: str = ""
+    metric_stds: dict[str, float] = field(default_factory=dict)
 
 
 def _walk_dot_path(data: Any, path: str) -> float:
@@ -493,12 +501,20 @@ def extract_metrics_from_results_jsonl(
     extract: dict[str, str],
     *,
     row: str = "last",
-) -> dict[str, float]:
+    extract_stds: dict[str, str] | None = None,
+) -> dict[str, float] | tuple[dict[str, float], dict[str, float]]:
     """Pull a metrics dict from one row of a sweep's ``results.jsonl``.
 
     ``extract`` maps milestone-metric names to dot-paths into the row
     (e.g. ``{"mean_total": "metrics.heldout.mean_total"}``). ``row`` is
     ``"last"`` (default) or ``"best"`` (highest :func:`get_score`).
+
+    When ``extract_stds`` is provided, returns a ``(metrics, stds)`` tuple
+    instead of a single dict. ``extract_stds`` mirrors ``extract`` (keys
+    are milestone metric names; values are dot-paths into the row). Use
+    this to pull both ``evaluation_score`` and ``evaluation_score_std``
+    in one call so :func:`append_milestone` can stamp the error bar at
+    the same time as the mean.
 
     Designed for the ``autoresearch-compare append-milestone
     --from-results-jsonl`` CLI mode — keeps the sweep-→-milestone path
@@ -514,7 +530,11 @@ def extract_metrics_from_results_jsonl(
         chosen = max(rows, key=get_score)
     else:
         raise ValueError(f"--row must be 'last' or 'best', got {row!r}")
-    return {dest: _walk_dot_path(chosen, path) for dest, path in extract.items()}
+    metrics = {dest: _walk_dot_path(chosen, path) for dest, path in extract.items()}
+    if extract_stds is None:
+        return metrics
+    stds = {dest: _walk_dot_path(chosen, path) for dest, path in extract_stds.items()}
+    return metrics, stds
 
 
 def append_milestone(
@@ -589,16 +609,35 @@ def load_milestones_yaml(path: str | Path) -> tuple[list[Milestone], dict[str, A
     raw = yaml.safe_load(Path(path).read_text())
     if not isinstance(raw, dict) or "milestones" not in raw:
         raise ValueError(f"{path}: top-level must be a mapping with a 'milestones' key")
-    milestones = [
-        Milestone(
-            label=str(m["label"]),
-            metrics={k: float(v) for k, v in (m.get("metrics") or {}).items()},
-            description=str(m.get("description") or ""),
-        )
-        for m in raw["milestones"]
-    ]
+    milestones = [_milestone_from_raw(m) for m in raw["milestones"]]
     kwargs = {k: v for k, v in raw.items() if k != "milestones"}
     return milestones, kwargs
+
+
+def _milestone_from_raw(m: dict[str, Any]) -> Milestone:
+    """Parse one milestone dict. A metric value may be either a scalar
+    (existing schema) or a dict ``{mean: float, std: float}`` — the latter
+    populates ``metric_stds`` so the renderer draws an error bar."""
+    metrics: dict[str, float] = {}
+    metric_stds: dict[str, float] = {}
+    for k, v in (m.get("metrics") or {}).items():
+        if isinstance(v, dict):
+            if "mean" not in v:
+                raise ValueError(
+                    f"milestone {m.get('label')!r} metric {k!r}: "
+                    f"dict form requires 'mean' key, got {sorted(v.keys())}"
+                )
+            metrics[k] = float(v["mean"])
+            if "std" in v:
+                metric_stds[k] = float(v["std"])
+        else:
+            metrics[k] = float(v)
+    return Milestone(
+        label=str(m["label"]),
+        metrics=metrics,
+        description=str(m.get("description") or ""),
+        metric_stds=metric_stds,
+    )
 
 
 _PRIMARY_PALETTE = ("#2563eb", "#0ea5e9", "#14b8a6", "#6366f1")
@@ -661,7 +700,10 @@ def _draw_metric_series(
     first_valid: list[tuple[int, float]] = []
     for i, key in enumerate(keys):
         vals: list[float | None] = [m.metrics.get(key) for m in milestones]
-        valid = [(x, v) for x, v in zip(xs, vals, strict=False) if v is not None]
+        # Align stds by milestone index; None where missing so error bars
+        # only render at points that have a std (mix-of-n=1-and-n>1 ok).
+        stds: list[float | None] = [m.metric_stds.get(key) for m in milestones]
+        valid = [(x, v, s) for x, v, s in zip(xs, vals, stds, strict=False) if v is not None]
         if not valid:
             if i == 0 and require_first:
                 raise ValueError(f"no milestone has metric {key!r}")
@@ -669,18 +711,36 @@ def _draw_metric_series(
         color = palette[i % len(palette)]
         marker = markers[i % len(markers)]
         line = ax.plot(
-            [x for x, _ in valid],
-            [v for _, v in valid],
+            [x for x, _, _ in valid],
+            [v for _, v, _ in valid],
             f"{linestyle}{marker}",
             color=color,
             linewidth=linewidth,
             markersize=markersize,
             label=f"{key} {label_suffix}",
         )[0]
+        # Per-point error bars where a std is available. Skip points
+        # without a std so the chart never draws a phantom zero-length bar.
+        err_xs = [x for x, _, s in valid if s is not None]
+        err_ys = [v for _, v, s in valid if s is not None]
+        err_es = [s for _, _, s in valid if s is not None]
+        if err_xs:
+            ax.errorbar(
+                err_xs,
+                err_ys,
+                yerr=err_es,
+                fmt="none",
+                ecolor=color,
+                elinewidth=linewidth * 0.6,
+                capsize=4,
+                capthick=linewidth * 0.6,
+                alpha=0.75,
+                zorder=2,
+            )
         drawn.append((key, color, line))
         handles.append(line)
         if i == 0:
-            first_valid = valid
+            first_valid = [(x, v) for x, v, _ in valid]
     return drawn, first_valid
 
 

@@ -192,6 +192,131 @@ def test_progression_empty_raises(tmp_path: Path) -> None:
         )
 
 
+# ── error-bar support ───────────────────────────────────────────────────
+
+
+def test_milestone_accepts_metric_stds_as_optional_field() -> None:
+    """``Milestone.metric_stds`` is an opt-in dict keyed by metric name.
+
+    When omitted (existing call sites) it defaults to an empty dict so
+    every existing Milestone construction keeps working unchanged.
+    """
+    m_no_std = Milestone(label="a", metrics={"score": 5.0})
+    assert m_no_std.metric_stds == {}
+
+    m_with_std = Milestone(label="b", metrics={"score": 5.0}, metric_stds={"score": 1.2})
+    assert m_with_std.metric_stds == {"score": 1.2}
+
+
+def test_load_milestones_yaml_parses_dict_form_for_std(tmp_path: Path) -> None:
+    """New YAML schema: a metric value may be either a scalar (existing) or
+    a dict ``{mean: ..., std: ...}``. Scalars stay in ``metrics``; std goes
+    into ``metric_stds``."""
+    yaml_path = tmp_path / "milestones.yaml"
+    yaml_path.write_text(
+        """
+title: "with stds"
+primary_metric: score
+milestones:
+  - label: a
+    metrics:
+      score: 5.0
+  - label: b
+    metrics:
+      score:
+        mean: 7.0
+        std: 1.5
+"""
+    )
+    milestones, meta = load_milestones_yaml(yaml_path)
+    assert meta["title"] == "with stds"
+    assert milestones[0].metrics == {"score": 5.0}
+    assert milestones[0].metric_stds == {}
+    assert milestones[1].metrics == {"score": 7.0}
+    assert milestones[1].metric_stds == {"score": 1.5}
+
+
+def test_load_milestones_yaml_rejects_dict_without_mean(tmp_path: Path) -> None:
+    """A dict form must include ``mean``. Missing mean = parse error."""
+    yaml_path = tmp_path / "bad.yaml"
+    yaml_path.write_text(
+        """
+milestones:
+  - label: a
+    metrics:
+      score:
+        std: 1.0
+"""
+    )
+    with pytest.raises(ValueError, match="mean"):
+        load_milestones_yaml(yaml_path)
+
+
+def test_progression_renders_with_error_bars(tmp_path: Path) -> None:
+    """The headline behaviour: a Milestone with metric_stds set causes the
+    chart to render error bars. We verify the PNG is produced; visual
+    inspection in CI is via the committed sample fixture if needed."""
+    milestones = [
+        Milestone(label="a", metrics={"score": 5.0}, metric_stds={"score": 0.5}),
+        Milestone(label="b", metrics={"score": 7.5}, metric_stds={"score": 1.2}),
+        Milestone(label="c", metrics={"score": 9.0}),  # no std → no error bar on this point
+    ]
+    out = tmp_path / "errbars.png"
+    plot_milestone_progression(
+        milestones,
+        primary_metric="score",
+        out_path=out,
+    )
+    assert out.exists()
+    assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_progression_no_error_bars_when_all_stds_missing(tmp_path: Path) -> None:
+    """Backwards compat: existing milestones without metric_stds render
+    exactly as before (no error bars). This is essentially the existing
+    ``test_progression_writes_png`` path — pinning that the absence of
+    metric_stds keeps the chart visually equivalent."""
+    milestones = [
+        Milestone(label="a", metrics={"score": 1.0}),
+        Milestone(label="b", metrics={"score": 2.0}),
+        Milestone(label="c", metrics={"score": 3.0}),
+    ]
+    out = tmp_path / "plain.png"
+    plot_milestone_progression(
+        milestones,
+        primary_metric="score",
+        out_path=out,
+    )
+    assert out.exists()
+
+
+def test_extract_metrics_from_results_jsonl_supports_std(tmp_path: Path) -> None:
+    """``extract_metrics_from_results_jsonl`` should be able to pull both
+    a mean and a std for a metric in one call.
+
+    New ``extract_stds`` kwarg mirrors ``extract`` — keys are milestone
+    metric names; values are dot-paths into the row. Returns a second dict
+    of std values that the caller can pass to ``append_milestone`` /
+    Milestone constructor. Keeps the sweep→milestone path one-shot."""
+    from autoresearch.compare import extract_metrics_from_results_jsonl
+
+    jsonl = tmp_path / "results.jsonl"
+    jsonl.write_text(json.dumps({"evaluation_score": 51.43, "evaluation_score_std": 12.78}) + "\n")
+    metrics = extract_metrics_from_results_jsonl(
+        jsonl,
+        extract={"score": "evaluation_score"},
+    )
+    assert metrics == {"score": 51.43}
+
+    metrics, stds = extract_metrics_from_results_jsonl(
+        jsonl,
+        extract={"score": "evaluation_score"},
+        extract_stds={"score": "evaluation_score_std"},
+    )
+    assert metrics == {"score": 51.43}
+    assert stds == {"score": 12.78}
+
+
 def test_load_milestones_yaml(tmp_path: Path) -> None:
     yaml_path = tmp_path / "milestones.yaml"
     yaml_path.write_text(
