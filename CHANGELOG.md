@@ -1,3 +1,13 @@
+## v0.23.0 (2026-05-16)
+
+### Feat
+
+- **compare**: error bars on milestone progression (#62)
+
+### Refactor
+
+- **scoreboard**: dedupe chart + CLI between scoreboard variants (#61)
+
 ## v0.22.0 (2026-05-11)
 
 ### Feat
