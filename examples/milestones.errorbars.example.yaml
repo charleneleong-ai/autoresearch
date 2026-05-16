@@ -1,0 +1,55 @@
+# Example milestones file showing per-point error bars.
+#
+# A metric value can be either:
+#   - a scalar: `evaluation_score: 57.14`               → bare marker, no whisker
+#   - a dict:   `evaluation_score: {mean: 51.43, std: 12.78}`  → ±std whisker
+#
+# Mix and match freely — useful when early stages are deterministic
+# (n=1) or were only run a couple of times (n=3 with σ=0), and later
+# stages have proper n=5 replicates with non-trivial variance. Bare
+# markers stay clean instead of showing phantom zero-length whiskers.
+#
+# Render with:
+#   autoresearch-compare progression \
+#       --milestones-yaml examples/milestones.errorbars.example.yaml \
+#       --out examples/milestones.errorbars.example.png
+
+title: "Project trajectory — with replicate error bars"
+primary_metric: evaluation_score
+threshold: 57.14
+threshold_label: "single-run ceiling"
+
+milestones:
+  - label: baseline
+    description: "n=1, deterministic config"
+    metrics:
+      evaluation_score: 57.14
+
+  - label: v1_planner
+    description: "n=3, σ collapsed to zero"
+    metrics:
+      evaluation_score: 57.14
+
+  - label: v2_thinking
+    description: "n=3, hit a regression"
+    metrics:
+      evaluation_score: 28.57
+
+  - label: v3_memory
+    description: "n=3, recovered to ceiling"
+    metrics:
+      evaluation_score: 57.14
+
+  - label: v4_iter_ttl
+    description: "n=5, first proper replicates"
+    metrics:
+      evaluation_score:
+        mean: 51.43
+        std: 12.78
+
+  - label: v5_selector
+    description: "n=5, plateaued near v4"
+    metrics:
+      evaluation_score:
+        mean: 51.43
+        std: 12.78
