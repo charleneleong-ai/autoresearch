@@ -609,10 +609,7 @@ def load_milestones_yaml(path: str | Path) -> tuple[list[Milestone], dict[str, A
     raw = yaml.safe_load(Path(path).read_text())
     if not isinstance(raw, dict) or "milestones" not in raw:
         raise ValueError(f"{path}: top-level must be a mapping with a 'milestones' key")
-    milestones = [
-        _milestone_from_raw(m)
-        for m in raw["milestones"]
-    ]
+    milestones = [_milestone_from_raw(m) for m in raw["milestones"]]
     kwargs = {k: v for k, v in raw.items() if k != "milestones"}
     return milestones, kwargs
 
@@ -706,11 +703,7 @@ def _draw_metric_series(
         # Align stds by milestone index; None where missing so error bars
         # only render at points that have a std (mix-of-n=1-and-n>1 ok).
         stds: list[float | None] = [m.metric_stds.get(key) for m in milestones]
-        valid = [
-            (x, v, s)
-            for x, v, s in zip(xs, vals, stds, strict=False)
-            if v is not None
-        ]
+        valid = [(x, v, s) for x, v, s in zip(xs, vals, stds, strict=False) if v is not None]
         if not valid:
             if i == 0 and require_first:
                 raise ValueError(f"no milestone has metric {key!r}")
@@ -733,9 +726,16 @@ def _draw_metric_series(
         err_es = [s for _, _, s in valid if s is not None]
         if err_xs:
             ax.errorbar(
-                err_xs, err_ys, yerr=err_es,
-                fmt="none", ecolor=color, elinewidth=linewidth * 0.6,
-                capsize=4, capthick=linewidth * 0.6, alpha=0.75, zorder=2,
+                err_xs,
+                err_ys,
+                yerr=err_es,
+                fmt="none",
+                ecolor=color,
+                elinewidth=linewidth * 0.6,
+                capsize=4,
+                capthick=linewidth * 0.6,
+                alpha=0.75,
+                zorder=2,
             )
         drawn.append((key, color, line))
         handles.append(line)

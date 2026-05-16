@@ -204,9 +204,7 @@ def test_milestone_accepts_metric_stds_as_optional_field() -> None:
     m_no_std = Milestone(label="a", metrics={"score": 5.0})
     assert m_no_std.metric_stds == {}
 
-    m_with_std = Milestone(
-        label="b", metrics={"score": 5.0}, metric_stds={"score": 1.2}
-    )
+    m_with_std = Milestone(label="b", metrics={"score": 5.0}, metric_stds={"score": 1.2})
     assert m_with_std.metric_stds == {"score": 1.2}
 
 
@@ -303,9 +301,7 @@ def test_extract_metrics_from_results_jsonl_supports_std(tmp_path: Path) -> None
     from autoresearch.compare import extract_metrics_from_results_jsonl
 
     jsonl = tmp_path / "results.jsonl"
-    jsonl.write_text(
-        json.dumps({"evaluation_score": 51.43, "evaluation_score_std": 12.78}) + "\n"
-    )
+    jsonl.write_text(json.dumps({"evaluation_score": 51.43, "evaluation_score_std": 12.78}) + "\n")
     metrics = extract_metrics_from_results_jsonl(
         jsonl,
         extract={"score": "evaluation_score"},
