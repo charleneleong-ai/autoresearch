@@ -93,6 +93,10 @@ version_files = [
     "README.md:badge/version-v",
 ]
 tag_format = "v$version"
+# Annotated tags so `git push --follow-tags` actually pushes them — the default
+# lightweight tags are silently skipped by --follow-tags (release.yml ran into
+# this on the v0.23.0 bump; the commit landed but the tag was lost).
+annotated_tag = true
 update_changelog_on_bump = true
 changelog_incremental = true
 # Major-version-zero: in 0.x.y, breaking changes bump minor (not major).
