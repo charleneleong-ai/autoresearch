@@ -197,8 +197,20 @@ def test_clean_episode_lands_in_success_file(tmp_path: Path) -> None:
     assert target == writer.success_path
     assert not writer.failed_path.exists()
     entry = json.loads(writer.success_path.read_text())
-    assert entry == {
-        **entry,
+    assert {
+        k: entry[k]
+        for k in (
+            "episode_id",
+            "completed",
+            "final_score",
+            "game_name",
+            "n_steps",
+            "n_fallbacks",
+            "total_input_tokens",
+            "total_output_tokens",
+            "total_cached_tokens",
+        )
+    } == {
         "episode_id": 0,
         "completed": True,
         "final_score": 12.5,
@@ -241,7 +253,9 @@ def test_buffer_clears_after_flush(tmp_path: Path) -> None:
 
     lines = writer.success_path.read_text().strip().split("\n")
     ep0, ep1 = json.loads(lines[0]), json.loads(lines[1])
-    assert ep0["n_steps"] == 2 and ep1["n_steps"] == 1 and ep1["episode_id"] == 1
+    assert ep0["n_steps"] == 2
+    assert ep1["n_steps"] == 1
+    assert ep1["episode_id"] == 1
 
 
 def test_steps_in_entry_are_sharegpt_shaped(tmp_path: Path) -> None:

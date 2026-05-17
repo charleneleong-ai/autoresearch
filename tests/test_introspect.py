@@ -20,14 +20,14 @@ def _make_adapter_module(tmp_path: Path) -> str:
     pkg = tmp_path / "fake_adapter_pkg"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("")
-    (pkg / "adapter.py").write_text(
-        "from autoresearch.trajectory import MilestoneSpec\n"
-        "def _gi(r): return r.get('obs', {}).get('game_info', {})\n"
-        "TRAJECTORY_MILESTONES = [MilestoneSpec('M1', lambda r: _gi(r).get('score', 0) >= 1)]\n"
-        "TRAJECTORY_SCORE_EXTRACTOR = lambda r: float(_gi(r).get('score', 0))\n"
-        "TRAJECTORY_ZONE_EXTRACTOR = lambda r: _gi(r).get('map_name', '?') or '?'\n"
-        "TRAJECTORY_SCORE_MAX = 1.0\n"
-    )
+    (pkg / "adapter.py").write_text("""\
+from autoresearch.trajectory import MilestoneSpec
+def _gi(r): return r.get('obs', {}).get('game_info', {})
+TRAJECTORY_MILESTONES = [MilestoneSpec('M1', lambda r: _gi(r).get('score', 0) >= 1)]
+TRAJECTORY_SCORE_EXTRACTOR = lambda r: float(_gi(r).get('score', 0))
+TRAJECTORY_ZONE_EXTRACTOR = lambda r: _gi(r).get('map_name', '?') or '?'
+TRAJECTORY_SCORE_MAX = 1.0
+""")
     return "fake_adapter_pkg.adapter"
 
 
