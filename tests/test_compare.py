@@ -666,6 +666,25 @@ def test_plot_milestone_bars_renders_threshold_lines(tmp_path: Path) -> None:
     assert any(abs(ln.get_ydata()[0] - 57.14) < 1e-6 for ln in hlines)
 
 
+def test_score_dot_colors_marks_min_and_max() -> None:
+    """Helper that color-codes per-iter scores: max breach → green,
+    min collapse → red, middle scores → neutral. When all scores are
+    equal (no spread) every dot stays neutral."""
+    from autoresearch.compare import _score_dot_colors
+
+    # Spread → extremes coloured.
+    colors = _score_dot_colors([71.43, 57.14, 28.57, 28.57, 28.57], neutral="#000")
+    assert colors == ["#16a34a", "#000", "#dc2626", "#dc2626", "#dc2626"]
+
+    # All equal → no extremes coloured.
+    flat = _score_dot_colors([57.14, 57.14, 57.14], neutral="#000")
+    assert flat == ["#000", "#000", "#000"]
+
+    # Two values → both are extremes.
+    two = _score_dot_colors([10.0, 20.0], neutral="#000")
+    assert two == ["#dc2626", "#16a34a"]
+
+
 def test_plot_milestone_bars_overlays_error_bars_and_scatter(tmp_path: Path) -> None:
     """metric_stds renders an error bar; metric_scores renders scatter dots —
     same machinery as plot_milestone_progression, just on bars."""

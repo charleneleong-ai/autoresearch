@@ -762,6 +762,8 @@ def _draw_metric_series(
         # Per-iter scatter overlay where metric_scores is populated. Each
         # raw score plots as a dot at the milestone's x — surfaces single-iter
         # outliers (e.g. one iter breaching a ceiling) that the σ band hides.
+        # Min/max are colour-coded (red/green) so a glance distinguishes
+        # "one iter breached" from "one iter collapsed".
         for x, ms in zip(xs, milestones, strict=False):
             raw = ms.metric_scores.get(key)
             if not raw:
@@ -769,11 +771,11 @@ def _draw_metric_series(
             ax.scatter(
                 [x] * len(raw),
                 raw,
-                color=color,
-                s=20,
+                c=_score_dot_colors(raw, neutral=color),
+                s=36,
                 edgecolor="white",
-                linewidth=0.8,
-                alpha=0.85,
+                linewidth=1.1,
+                alpha=0.95,
                 zorder=4,
             )
         drawn.append((key, color, line))
@@ -987,6 +989,26 @@ def plot_milestone_progression(
 
 # ── milestone bars (cross-stage A/B comparison) ────────────────────────
 
+_DOT_MAX_COLOR = "#16a34a"  # green — best iter (often the breach)
+_DOT_MIN_COLOR = "#dc2626"  # red — worst iter (often the collapse)
+
+
+def _score_dot_colors(scores: Sequence[float], *, neutral: str) -> list[str]:
+    """Color-code per-iter dots: max → green, min → red, middle → neutral.
+
+    Returns a per-score colour list aligned with ``scores``. When all
+    values are equal (no spread to highlight), every dot gets ``neutral``.
+    Lets a glance at the chart distinguish *"one iter breached"* from
+    *"one iter collapsed"* without reading the legend.
+    """
+    if not scores:
+        return []
+    lo, hi = min(scores), max(scores)
+    if lo == hi:
+        return [neutral] * len(scores)
+    return [_DOT_MAX_COLOR if v == hi else _DOT_MIN_COLOR if v == lo else neutral for v in scores]
+
+
 VERDICT_PALETTE: dict[str, str] = {
     "BASELINE": "#7f8c8d",
     "FLAT": "#3498db",
@@ -1081,6 +1103,8 @@ def plot_milestone_bars(
         b.set_alpha(a)
 
     # Per-iter scatter overlay (same machinery as plot_milestone_progression).
+    # Min/max are colour-coded (red/green) so a glance distinguishes a
+    # breach iter from a collapse iter at the chart level.
     for x, m in zip(xs, milestones, strict=False):
         raw = m.metric_scores.get(primary_metric)
         if not raw:
@@ -1088,10 +1112,10 @@ def plot_milestone_bars(
         ax.scatter(
             [x] * len(raw),
             raw,
-            color="black",
-            s=22,
+            c=_score_dot_colors(raw, neutral="black"),
+            s=42,
             edgecolor="white",
-            linewidth=0.9,
+            linewidth=1.2,
             zorder=5,
         )
 
