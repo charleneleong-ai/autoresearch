@@ -1,3 +1,9 @@
+## v0.24.2 (2026-05-17)
+
+### Fix
+
+- **introspect**: render milestone step 0 as @0, not @n/a (#67)
+
 ## v0.24.1 (2026-05-17)
 
 ### Refactor
