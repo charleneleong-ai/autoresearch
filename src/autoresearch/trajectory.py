@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -315,8 +316,6 @@ def extract_iter_metrics(
     Pokemon-specific milestones / zones live in ``game_adapter.TRAJECTORY_MILESTONES``
     etc.; Mario / 2048 ship their own adapter blocks.
     """
-    from collections import Counter
-
     gs = run_dir / "game_states.jsonl"
     if not gs.exists():
         return IterMetrics(
@@ -364,7 +363,8 @@ def extract_iter_metrics(
     summ = run_dir / "evaluation_summary.json"
     if summ.exists():
         try:
-            ep = json.load(summ.open()).get("episodes", [{}])[0]
+            with summ.open() as f:
+                ep = json.load(f).get("episodes", [{}])[0]
             fs = ep.get("final_score")
             if fs is not None:
                 final_score = float(fs)

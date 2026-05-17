@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.24.0"
+__version__ = "0.23.1"
 
 from autoresearch.compare import (
     Milestone,
@@ -61,6 +61,9 @@ from autoresearch.retrospective import (
     attach_findings_to_row,
     audit_iter,
     filter_by_severity,
+)
+from autoresearch.retrospective import (
+    format_markdown as format_retrospective_markdown,
 )
 from autoresearch.retrospective import (
     load_spec as load_retrospective_spec,
@@ -217,5 +220,6 @@ __all__ = [
     "attach_findings_to_row",
     "audit_iter",
     "filter_by_severity",
+    "format_retrospective_markdown",
     "load_retrospective_spec",
 ]
