@@ -1,3 +1,9 @@
+## v0.24.0 (2026-05-17)
+
+### Feat
+
+- **trajectory**: introspect framework — MilestoneSpec / DwellSpec / ActionSpec + CLI (#65)
+
 ## v0.23.1 (2026-05-16)
 
 ### Fix
