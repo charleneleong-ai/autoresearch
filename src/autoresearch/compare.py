@@ -1035,13 +1035,15 @@ def _metric_yerr(milestones: Sequence[Milestone], key: str) -> tuple[list[float]
     return lower, upper
 
 
-def _dedupe_scores(scores: Sequence[float]) -> list[tuple[float, int]]:
-    """Collapse repeated per-iter scores into ``(value, count)`` pairs.
+def _count_iters_per_score(scores: Sequence[float]) -> list[tuple[float, int]]:
+    """Count how many iters landed on each unique score value.
 
-    The chart annotates ``×N`` next to a dot when ``count > 1`` so multiple
-    iters landing on the same value (e.g. Stage L's 4× ceiling iters at
-    57.14) don't render as a single stacked dot and silently hide the
-    other 3 data points.
+    Returns ``[(value, iter_count), ...]`` — one entry per distinct
+    value in ``scores``, with the number of iters that hit it. The
+    chart uses this to render a single dot per value and annotate
+    ``×N`` when ``iter_count > 1`` so multiple iters landing on the
+    same score (e.g. Stage L's 4× ceiling iters at 57.14) don't
+    collapse to a lone dot and silently hide the other 3 data points.
     """
     counts: dict[float, int] = {}
     for v in scores:
@@ -1171,8 +1173,8 @@ def plot_milestone_bars(
         raw = m.metric_scores.get(primary_metric)
         if not raw:
             continue
-        dedup = _dedupe_scores(raw)
-        unique_vals = [v for v, _ in dedup]
+        iters_per_score = _count_iters_per_score(raw)
+        unique_vals = [v for v, _ in iters_per_score]
         colors = _score_dot_colors(unique_vals, neutral="black")
         ax.scatter(
             [x] * len(unique_vals),
@@ -1183,10 +1185,10 @@ def plot_milestone_bars(
             linewidth=1.6,
             zorder=5,
         )
-        for (value, count), color in zip(dedup, colors, strict=False):
-            if count > 1:
+        for (value, iter_count), color in zip(iters_per_score, colors, strict=False):
+            if iter_count > 1:
                 ax.annotate(
-                    f"×{count}",
+                    f"×{iter_count}",
                     xy=(x, value),
                     xytext=(9, 0),
                     textcoords="offset points",

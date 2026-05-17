@@ -666,21 +666,20 @@ def test_plot_milestone_bars_renders_threshold_lines(tmp_path: Path) -> None:
     assert any(abs(ln.get_ydata()[0] - 57.14) < 1e-6 for ln in hlines)
 
 
-def test_dedupe_scores_groups_duplicates_with_count() -> None:
-    """Stacked-dot count helper: collapses repeated scores into
-    ``(value, count)`` pairs so the chart can annotate ``×N`` next to
-    a dot that's hiding multiple iters."""
-    from autoresearch.compare import _dedupe_scores
+def test_count_iters_per_score_groups_repeats() -> None:
+    """Stacked-dot helper: counts iters per unique score value so the
+    chart can annotate ``×N`` next to a dot hiding multiple iters."""
+    from autoresearch.compare import _count_iters_per_score
 
     # Stage L pattern: 4 ceiling iters + 1 dropout
-    out = _dedupe_scores([57.14, 57.14, 57.14, 28.57, 57.14])
-    assert sorted(out) == [(28.57, 1), (57.14, 4)]
-
+    assert sorted(_count_iters_per_score([57.14, 57.14, 57.14, 28.57, 57.14])) == [
+        (28.57, 1),
+        (57.14, 4),
+    ]
     # All distinct: every dot is its own (value, 1)
-    assert sorted(_dedupe_scores([1.0, 2.0, 3.0])) == [(1.0, 1), (2.0, 1), (3.0, 1)]
-
+    assert sorted(_count_iters_per_score([1.0, 2.0, 3.0])) == [(1.0, 1), (2.0, 1), (3.0, 1)]
     # Empty list → empty
-    assert _dedupe_scores([]) == []
+    assert _count_iters_per_score([]) == []
 
 
 def test_plot_milestone_bars_value_format_controls_label(tmp_path: Path) -> None:
