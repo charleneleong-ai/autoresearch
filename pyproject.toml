@@ -1,6 +1,6 @@
 [project]
 name = "autoresearch"
-version = "0.24.2"
+version = "0.25.0"
 description = "Self-driving experiment sweep loop — daemon-detached autoresearch.py + live PR-updating progress chart."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -87,7 +87,7 @@ ignore = ["B008"]
 # Then `git push --follow-tags` fires .github/workflows/release.yml.
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.24.2"
+version = "0.25.0"
 version_files = [
     "pyproject.toml:^version",
     "src/autoresearch/__init__.py:^__version__",

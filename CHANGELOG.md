@@ -1,3 +1,9 @@
+## v0.25.0 (2026-05-17)
+
+### Feat
+
+- **compare**: per-iter scatter overlay via Milestone.metric_scores (#68)
+
 ## v0.24.2 (2026-05-17)
 
 ### Fix
