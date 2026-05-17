@@ -1035,6 +1035,20 @@ def _metric_yerr(milestones: Sequence[Milestone], key: str) -> tuple[list[float]
     return lower, upper
 
 
+def _dedupe_scores(scores: Sequence[float]) -> list[tuple[float, int]]:
+    """Collapse repeated per-iter scores into ``(value, count)`` pairs.
+
+    The chart annotates ``×N`` next to a dot when ``count > 1`` so multiple
+    iters landing on the same value (e.g. Stage L's 4× ceiling iters at
+    57.14) don't render as a single stacked dot and silently hide the
+    other 3 data points.
+    """
+    counts: dict[float, int] = {}
+    for v in scores:
+        counts[v] = counts.get(v, 0) + 1
+    return list(counts.items())
+
+
 def _score_dot_colors(scores: Sequence[float], *, neutral: str) -> list[str]:
     """Color-code per-iter dots: max → green, min → red, middle → neutral.
 
@@ -1072,6 +1086,7 @@ def plot_milestone_bars(
     ylabel: str | None = None,
     pending_value: float | None = None,
     show_descriptions: bool = True,
+    value_format: str = "{:.2f}",
     figsize: tuple[float, float] = (13.0, 7.0),
     dpi: int = 140,
     return_fig: bool = False,
@@ -1149,27 +1164,48 @@ def plot_milestone_bars(
 
     # Per-iter scatter overlay (same machinery as plot_milestone_progression).
     # Min/max are colour-coded (red/green) so a glance distinguishes a
-    # breach iter from a collapse iter at the chart level.
+    # breach iter from a collapse iter at the chart level. Repeated iters
+    # at the same value collapse to a single dot with an ``×N`` badge so
+    # the chart doesn't silently hide stacked data points.
     for x, m in zip(xs, milestones, strict=False):
         raw = m.metric_scores.get(primary_metric)
         if not raw:
             continue
+        dedup = _dedupe_scores(raw)
+        unique_vals = [v for v, _ in dedup]
+        colors = _score_dot_colors(unique_vals, neutral="black")
         ax.scatter(
-            [x] * len(raw),
-            raw,
-            c=_score_dot_colors(raw, neutral="black"),
+            [x] * len(unique_vals),
+            unique_vals,
+            c=colors,
             s=85,
             edgecolor="white",
             linewidth=1.6,
             zorder=5,
         )
+        for (value, count), color in zip(dedup, colors, strict=False):
+            if count > 1:
+                ax.annotate(
+                    f"×{count}",
+                    xy=(x, value),
+                    xytext=(9, 0),
+                    textcoords="offset points",
+                    ha="left",
+                    va="center",
+                    fontsize=8,
+                    fontweight="bold",
+                    color=color,
+                    zorder=6,
+                )
 
     for x, m, e, v, n in zip(xs, means, err_upper, verdicts, ns, strict=False):
         top = placeholder_h if v == "PENDING" else m + (e or 0.0)
         if v == "PENDING":
             ax.text(x, top + 1.8, "TBD", ha="center", fontsize=10, fontweight="bold", color="#666")
         else:
-            ax.text(x, top + 1.8, f"{m:.2f}", ha="center", fontsize=10, fontweight="bold")
+            ax.text(
+                x, top + 1.8, value_format.format(m), ha="center", fontsize=10, fontweight="bold"
+            )
         n_label = f"  n={n}" if n is not None else ""
         ax.text(
             x,
