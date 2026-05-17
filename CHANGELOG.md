@@ -1,3 +1,9 @@
+## v0.26.1 (2026-05-17)
+
+### Fix
+
+- **compare**: error bar uses observed min/max range when metric_scores is present (#70)
+
 ## v0.26.0 (2026-05-17)
 
 ### Feat
