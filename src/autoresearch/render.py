@@ -10,7 +10,7 @@ Single-game and multi-game (per-row `game` field) layouts both supported:
 - Single-game: one axis spanning the full figure
 - Multi-game: vertically stacked subplots, one per `game`
 
-Adapt `_STATUS_STYLE` / `_kill_tag` if your project uses a different palette
+Adapt `_STATUS_STYLE` / `_format_kill_label` if your project uses a different palette
 or triage vocabulary.
 """
 
@@ -76,8 +76,8 @@ _KILL_LABELS: dict[str, Any] = {
 }
 
 
-def _kill_tag(kill_reason: str) -> str:
-    """Map a long triage reason to a short inline label via categorize_kill_reason."""
+def _format_kill_label(kill_reason: str) -> str:
+    """Map a long triage reason to a short inline display label via categorize_kill_reason."""
     if not kill_reason:
         return "killed early"
     cat, extras = categorize_kill_reason(kill_reason)
@@ -132,7 +132,7 @@ def _draw_axis(
         m = r.get("metrics") or {}
         status = r.get("status", "DISCARD")
         if status == "EARLY_KILL":
-            tag = _kill_tag(m.get("kill_reason", "") or r.get("notes", ""))
+            tag = _format_kill_label(m.get("kill_reason", "") or r.get("notes", ""))
         elif status == "CRASH" and m.get("crash_reason"):
             cr = m["crash_reason"]
             tag = f"crashed: {cr[:30]}{'…' if len(cr) > 30 else ''}"

@@ -100,8 +100,8 @@ def _kill_short(kill_reason: str) -> str:
     return kill_reason[:40] if kill_reason else "killed"
 
 
-def _build_narrative(rows: list[dict[str, Any]], score_field: str = "score") -> str:
-    """Build the markdown table that lives between the marker comments."""
+def _build_results_table(rows: list[dict[str, Any]], score_field: str = "score") -> str:
+    """Build the markdown results table that lives between the marker comments."""
     if not rows:
         return "_(no results yet)_"
 
@@ -279,8 +279,8 @@ def main(
             png_changed = _refresh_png(experiments_dir, tag, config_name, png_path, score_field)
             pushed = _git_push_png_if_changed(png_path, branch, cwd) if png_changed else False
             rows = load_results(experiments_dir, tag, config_name)
-            narrative = _build_narrative(rows, score_field=score_field)
-            patched = _patch_pr_body(repo, pr, narrative, cwd)
+            results_table = _build_results_table(rows, score_field=score_field)
+            patched = _patch_pr_body(repo, pr, results_table, cwd)
             png_tag = "[green]✓[/green]" if png_changed else "·"
             push_tag = "[green]✓[/green]" if pushed else "·"
             patch_tag = "[green]✓[/green]" if patched else "·"

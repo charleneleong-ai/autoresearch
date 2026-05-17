@@ -32,24 +32,26 @@ def extract_cache_stats(usage: Any) -> dict[str, int]:
 
     cached = 0
 
-    prompt_details = _get(usage, "prompt_tokens_details", None)
+    prompt_details = _attr_or_dict_get(usage, "prompt_tokens_details", None)
     if prompt_details is not None:
-        cached += _get(prompt_details, "cached_tokens", 0) or 0
+        cached += _attr_or_dict_get(prompt_details, "cached_tokens", 0) or 0
 
-    inp_details = _get(usage, "input_tokens_details", None)
+    inp_details = _attr_or_dict_get(usage, "input_tokens_details", None)
     if inp_details is not None:
-        cached += _get(inp_details, "cached_tokens", 0) or 0
+        cached += _attr_or_dict_get(inp_details, "cached_tokens", 0) or 0
 
     return {
         "cached_tokens": cached,
-        "input_tokens": _get(usage, "prompt_tokens", 0) or _get(usage, "input_tokens", 0) or 0,
-        "output_tokens": _get(usage, "completion_tokens", 0)
-        or _get(usage, "output_tokens", 0)
+        "input_tokens": _attr_or_dict_get(usage, "prompt_tokens", 0)
+        or _attr_or_dict_get(usage, "input_tokens", 0)
+        or 0,
+        "output_tokens": _attr_or_dict_get(usage, "completion_tokens", 0)
+        or _attr_or_dict_get(usage, "output_tokens", 0)
         or 0,
     }
 
 
-def _get(obj: Any, key: str, default: Any) -> Any:
+def _attr_or_dict_get(obj: Any, key: str, default: Any) -> Any:
     if obj is None:
         return default
     if isinstance(obj, dict):
