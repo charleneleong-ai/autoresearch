@@ -84,14 +84,18 @@ def fetch_history(
         ) from e
 
     ref = parse_run_url(run_url)
-    api = Api()
     try:
+        api = Api()
         run = api.run(ref.path)
-    except Exception as e:  # wandb raises a CommError / ValueError stack
-        raise RuntimeError(f"wandb api.run({ref.path!r}) failed: {e}") from e
+        # `samples=N` returns a sampled DataFrame — much faster than `scan_history`.
+        df = run.history(samples=samples, keys=list(keys), pandas=True)
+    except Exception as e:
+        # API boundary: wandb raises an undocumented mix (CommError, UsageError
+        # when WANDB_API_KEY is unset, ValueError on bad paths, network
+        # timeouts). Funnel everything into a typed RuntimeError so callers
+        # can write a narrow `except (RuntimeError, ValueError):`.
+        raise RuntimeError(f"wandb fetch failed for {ref.path!r}: {e}") from e
 
-    # `samples=N` returns a sampled DataFrame — much faster than `scan_history`.
-    df = run.history(samples=samples, keys=list(keys), pandas=True)
     out: dict[str, list[float]] = {}
     for k in keys:
         if k not in df.columns:

@@ -543,22 +543,17 @@ def test_gradient_collapse_silent_on_wandb_api_failure(
     assert BUILTIN_DETECTORS["gradient_collapse"](IterContext(row)) is None
 
 
-def test_gradient_collapse_silent_on_arbitrary_fetch_history_exception(
+def test_gradient_collapse_silent_on_bad_url_value_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """fetch_history can raise anything (wandb.errors.UsageError when WANDB_API_KEY
-    is unset, ConnectionError when offline, JSONDecodeError on garbled responses).
-    Detector contract: silently skip on any exception, never crash the sweep."""
+    """fetch_history raises ValueError for an unparseable URL — detector skips silently."""
     import autoresearch.wandb_history as mod
 
-    class FakeUsageError(Exception):
-        """Stand-in for wandb.errors.UsageError — neither ValueError nor RuntimeError."""
-
     def boom(*, run_url: str, keys: list[str], samples: int = 500) -> dict:
-        raise FakeUsageError("No API key configured. Use `wandb login` to log in.")
+        raise ValueError(f"Unrecognised wandb run reference {run_url!r}.")
 
     monkeypatch.setattr(mod, "fetch_history", boom)
-    row = {"experiment": 1, "wandb_url": "charlene/orak/abc"}
+    row = {"experiment": 1, "wandb_url": "not-a-real-url"}
     assert BUILTIN_DETECTORS["gradient_collapse"](IterContext(row)) is None
 
 
