@@ -100,9 +100,14 @@ from autoresearch.token_confidence import (
     Sample as TokenConfidenceSample,
 )
 from autoresearch.trajectory import (
+    ActionSpec,
+    DwellSpec,
+    IterMetrics,
+    MilestoneSpec,
     StepRecord,
     TrajectoryWriter,
     convert_scratchpad_to_think,
+    extract_iter_metrics,
     format_recent_history,
     has_incomplete_scratchpad,
 )
@@ -170,11 +175,16 @@ __all__ = [
     "compute_verdict",
     "format_markdown",
     "load_spec",
-    # trajectory writer for agentic-RL pipelines
+    # trajectory writer + post-hoc introspection
+    "ActionSpec",
+    "DwellSpec",
+    "IterMetrics",
+    "MilestoneSpec",
     "StepRecord",
     "TrajectoryWriter",
-    "format_recent_history",
     "convert_scratchpad_to_think",
+    "extract_iter_metrics",
+    "format_recent_history",
     "has_incomplete_scratchpad",
     # llm-utils phase 1 — retry / caching / normalisation
     "ClassifiedError",
