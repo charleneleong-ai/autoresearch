@@ -271,6 +271,63 @@ def test_progression_renders_with_error_bars(tmp_path: Path) -> None:
     assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def test_milestone_accepts_metric_scores_as_optional_field() -> None:
+    """``Milestone.metric_scores`` is an opt-in per-metric list of raw iter
+    scores. Renders as a scatter overlay on the chart so single-iter
+    breaches don't get hidden inside a wide mean ± std band."""
+    m_no_scores = Milestone(label="a", metrics={"score": 5.0})
+    assert m_no_scores.metric_scores == {}
+
+    m_with_scores = Milestone(
+        label="b",
+        metrics={"score": 42.86},
+        metric_stds={"score": 20.2},
+        metric_scores={"score": [71.43, 57.14, 28.57, 28.57, 28.57]},
+    )
+    assert m_with_scores.metric_scores == {"score": [71.43, 57.14, 28.57, 28.57, 28.57]}
+
+
+def test_load_milestones_yaml_parses_scores_list(tmp_path: Path) -> None:
+    """YAML schema: a metric value may carry a ``scores`` list alongside
+    ``mean`` / ``std``. Populates ``metric_scores`` for scatter rendering."""
+    yaml_path = tmp_path / "milestones.yaml"
+    yaml_path.write_text(
+        """
+primary_metric: score
+milestones:
+  - label: a
+    metrics:
+      score:
+        mean: 42.86
+        std: 20.2
+        scores: [71.43, 57.14, 28.57, 28.57, 28.57]
+"""
+    )
+    milestones, _ = load_milestones_yaml(yaml_path)
+    assert milestones[0].metrics == {"score": 42.86}
+    assert milestones[0].metric_stds == {"score": 20.2}
+    assert milestones[0].metric_scores == {"score": [71.43, 57.14, 28.57, 28.57, 28.57]}
+
+
+def test_progression_overlays_scatter_when_metric_scores_present(tmp_path: Path) -> None:
+    """A Milestone with ``metric_scores`` renders per-iter scatter dots on top
+    of the mean ± std line — surfaces iter-level outliers (e.g. a single iter
+    breaching a ceiling) that the σ band hides."""
+    milestones = [
+        Milestone(
+            label="a",
+            metrics={"score": 42.86},
+            metric_stds={"score": 20.2},
+            metric_scores={"score": [71.43, 57.14, 28.57, 28.57, 28.57]},
+        ),
+        Milestone(label="b", metrics={"score": 50.0}),  # no scatter — bare marker
+    ]
+    out = tmp_path / "scatter.png"
+    plot_milestone_progression(milestones, primary_metric="score", out_path=out)
+    assert out.exists()
+    assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def test_progression_no_error_bars_when_all_stds_missing(tmp_path: Path) -> None:
     """Backwards compat: existing milestones without metric_stds render
     exactly as before (no error bars). This is essentially the existing

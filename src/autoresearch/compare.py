@@ -472,12 +472,19 @@ class Milestone:
     ``mean ± std`` at that point. Milestones without a std for a given
     metric draw as bare markers (no whisker), so you can mix n=1 and
     n>1 milestones on the same chart.
+
+    ``metric_scores`` is optional per-metric raw iter scores. When a key
+    appears, :func:`plot_milestone_progression` overlays the individual
+    scores as scatter dots on top of the mean — surfaces single-iter
+    outliers (e.g. an iter breaching a ceiling once) that a wide σ band
+    would otherwise hide.
     """
 
     label: str
     metrics: dict[str, float]
     description: str = ""
     metric_stds: dict[str, float] = field(default_factory=dict)
+    metric_scores: dict[str, list[float]] = field(default_factory=dict)
 
 
 def _walk_dot_path(data: Any, path: str) -> float:
@@ -616,10 +623,12 @@ def load_milestones_yaml(path: str | Path) -> tuple[list[Milestone], dict[str, A
 
 def _milestone_from_raw(m: dict[str, Any]) -> Milestone:
     """Parse one milestone dict. A metric value may be either a scalar
-    (existing schema) or a dict ``{mean: float, std: float}`` — the latter
-    populates ``metric_stds`` so the renderer draws an error bar."""
+    (existing schema) or a dict ``{mean: float, std?: float, scores?: list[float]}``
+    — ``std`` populates ``metric_stds`` (error bar) and ``scores`` populates
+    ``metric_scores`` (per-iter scatter overlay)."""
     metrics: dict[str, float] = {}
     metric_stds: dict[str, float] = {}
+    metric_scores: dict[str, list[float]] = {}
     for k, v in (m.get("metrics") or {}).items():
         if isinstance(v, dict):
             if "mean" not in v:
@@ -630,6 +639,8 @@ def _milestone_from_raw(m: dict[str, Any]) -> Milestone:
             metrics[k] = float(v["mean"])
             if "std" in v:
                 metric_stds[k] = float(v["std"])
+            if "scores" in v:
+                metric_scores[k] = [float(x) for x in v["scores"]]
         else:
             metrics[k] = float(v)
     return Milestone(
@@ -637,6 +648,7 @@ def _milestone_from_raw(m: dict[str, Any]) -> Milestone:
         metrics=metrics,
         description=str(m.get("description") or ""),
         metric_stds=metric_stds,
+        metric_scores=metric_scores,
     )
 
 
@@ -736,6 +748,23 @@ def _draw_metric_series(
                 capthick=linewidth * 0.6,
                 alpha=0.75,
                 zorder=2,
+            )
+        # Per-iter scatter overlay where metric_scores is populated. Each
+        # raw score plots as a dot at the milestone's x — surfaces single-iter
+        # outliers (e.g. one iter breaching a ceiling) that the σ band hides.
+        for x, ms in zip(xs, milestones, strict=False):
+            raw = ms.metric_scores.get(key)
+            if not raw:
+                continue
+            ax.scatter(
+                [x] * len(raw),
+                raw,
+                color=color,
+                s=20,
+                edgecolor="white",
+                linewidth=0.8,
+                alpha=0.85,
+                zorder=4,
             )
         drawn.append((key, color, line))
         handles.append(line)
