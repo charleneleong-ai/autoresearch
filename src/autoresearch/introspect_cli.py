@@ -18,13 +18,13 @@ source, different timing, different question.
 
 Usage::
 
-    uv run autoresearch-introspect \\
+    uv run introspect \\
         --run "L:/tmp/orak-stage-l/pokemon_red:stage_l_map_aware_iter*" \\
         --run "M:/tmp/orak-stage-m/pokemon_red:stage_m_multi_signal_iter*" \\
         --adapter agents.pokemon_red.game_adapter
 
     # machine-readable output for downstream scripts
-    uv run autoresearch-introspect \\
+    uv run introspect \\
         --run "L:/tmp/stage-l:iter*" --run "M:/tmp/stage-m:iter*" \\
         --adapter agents.pokemon_red.game_adapter \\
         --format json | jq '.[].mean_score_pct'
