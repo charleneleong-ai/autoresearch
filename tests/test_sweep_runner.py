@@ -701,5 +701,34 @@ def test_planner_sees_updated_history_between_yields(
     assert planner.lengths == [0, 1]
 
 
+@patch("autoresearch.sweep_runner.kill_gracefully")
+@patch("autoresearch.sweep_runner.wait_with_timeout", return_value=(0, None))
+@patch("autoresearch.sweep_runner.subprocess.Popen")
+def test_triage_setup_failure_kills_child_proc(
+    mock_popen: MagicMock,
+    mock_wait: MagicMock,
+    mock_kill: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """If triage.setup raises after Popen, the child must be killed —
+    otherwise the training subprocess outlives the orchestrator."""
+    proc = _mock_popen()
+    mock_popen.return_value = proc
+
+    class ExplodingTriage(FakeTriage):
+        def setup(
+            self, plan: IterPlan, proc: subprocess.Popen[bytes], baseline: float
+        ) -> str | None:
+            raise RuntimeError("triage init blew up")
+
+    plans = [IterPlan(cmd=["echo", "1"], description="iter 1")]
+    runner = _make_runner(tmp_path, plans=plans, triage=ExplodingTriage())
+
+    with pytest.raises(RuntimeError, match="triage init blew up"):
+        runner.run()
+
+    mock_kill.assert_called_once_with(proc)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -46,7 +46,7 @@ from autoresearch.retrospective import (
     filter_by_severity,
     format_markdown,
 )
-from autoresearch.subprocess_utils import wait_with_timeout
+from autoresearch.subprocess_utils import kill_gracefully, wait_with_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -325,17 +325,25 @@ class SweepRunner:
                 cwd=plan.cwd,
                 **plan.popen_kwargs,
             )
-            run_id = self.triage.setup(plan, proc, best_score)
+            try:
+                run_id = self.triage.setup(plan, proc, best_score)
 
-            launch_time = time.monotonic()
-            returncode, kill_reason = wait_with_timeout(
-                proc,
-                timeout_s=timeout_s,
-                poll_s=self.triage_poll_s,
-                should_kill=lambda: self.triage.check(time.monotonic() - launch_time),
-            )
-            elapsed_s = time.monotonic() - launch_time
-            self.triage.teardown()
+                launch_time = time.monotonic()
+                returncode, kill_reason = wait_with_timeout(
+                    proc,
+                    timeout_s=timeout_s,
+                    poll_s=self.triage_poll_s,
+                    should_kill=lambda: self.triage.check(time.monotonic() - launch_time),
+                )
+                elapsed_s = time.monotonic() - launch_time
+                self.triage.teardown()
+            except BaseException:
+                # triage.setup, wait_with_timeout, or a Ctrl-C can raise after
+                # the child has started — without an explicit kill the proc
+                # outlives the orchestrator. kill_gracefully escalates
+                # SIGINT→SIGTERM→SIGKILL so we never leak a training process.
+                kill_gracefully(proc)
+                raise
 
         exit_code = returncode if returncode is not None else -1
 

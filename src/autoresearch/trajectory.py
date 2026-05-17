@@ -341,7 +341,7 @@ def extract_iter_metrics(
     for i, raw in enumerate(lines):
         try:
             row = json.loads(raw)
-        except Exception:
+        except json.JSONDecodeError:
             continue
 
         for spec in milestone_specs:
@@ -368,7 +368,7 @@ def extract_iter_metrics(
             fs = ep.get("final_score")
             if fs is not None:
                 final_score = float(fs)
-        except Exception:
+        except (OSError, json.JSONDecodeError, IndexError, TypeError, ValueError):
             pass
 
     if len(targets) > 1:
