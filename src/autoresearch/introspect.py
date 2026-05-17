@@ -135,7 +135,10 @@ def main(
                 continue
 
             ms_parts = " ".join(
-                f"{n}@{r.first_milestone_step[n] or 'n/a'}" for n in milestone_names
+                f"{n}@{r.first_milestone_step[n]}"
+                if r.first_milestone_step[n] is not None
+                else f"{n}@n/a"
+                for n in milestone_names
             )
             dw_parts = " ".join(f"{k}={v:>3}" for k, v in r.dwell_counts.items())
             name = r.run_id
