@@ -772,9 +772,9 @@ def _draw_metric_series(
                 [x] * len(raw),
                 raw,
                 c=_score_dot_colors(raw, neutral=color),
-                s=36,
+                s=70,
                 edgecolor="white",
-                linewidth=1.1,
+                linewidth=1.4,
                 alpha=0.95,
                 zorder=4,
             )
@@ -1113,9 +1113,9 @@ def plot_milestone_bars(
             [x] * len(raw),
             raw,
             c=_score_dot_colors(raw, neutral="black"),
-            s=42,
+            s=85,
             edgecolor="white",
-            linewidth=1.2,
+            linewidth=1.6,
             zorder=5,
         )
 
