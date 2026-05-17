@@ -520,12 +520,12 @@ def test_extract_returns_itmetrics_dataclass(tmp_path: Path) -> None:
     assert m.run_id == tmp_path.name
 
 
-# ── introspect_cli --format json ───────────────────────────────────────
+# ── introspect --format json ───────────────────────────────────────────
 
 
 from typer.testing import CliRunner  # noqa: E402
 
-from autoresearch.introspect_cli import app  # noqa: E402
+from autoresearch.introspect import app  # noqa: E402
 
 _runner = CliRunner()
 
