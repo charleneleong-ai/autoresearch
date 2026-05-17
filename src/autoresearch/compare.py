@@ -1200,13 +1200,32 @@ def plot_milestone_bars(
                     zorder=6,
                 )
 
-    for x, m, e, v, n in zip(xs, means, err_upper, verdicts, ns, strict=False):
-        top = placeholder_h if v == "PENDING" else m + (e or 0.0)
+    for x, m, v, n in zip(xs, means, verdicts, ns, strict=False):
         if v == "PENDING":
-            ax.text(x, top + 1.8, "TBD", ha="center", fontsize=10, fontweight="bold", color="#666")
-        else:
             ax.text(
-                x, top + 1.8, value_format.format(m), ha="center", fontsize=10, fontweight="bold"
+                x,
+                placeholder_h + 1.8,
+                "TBD",
+                ha="center",
+                fontsize=10,
+                fontweight="bold",
+                color="#666",
+            )
+        else:
+            # Anchor the value label just above the mean bar top — the
+            # number reads "near the mean", not at the top of the
+            # whisker (which is the max, not the mean). White bbox masks
+            # the whisker line passing behind the text for asymmetric
+            # error bars where mean + 1.8 lands inside the whisker range.
+            ax.text(
+                x,
+                m + 1.8,
+                value_format.format(m),
+                ha="center",
+                fontsize=10,
+                fontweight="bold",
+                zorder=6,
+                bbox=dict(facecolor="white", edgecolor="none", pad=1.0),
             )
         n_label = f"  n={n}" if n is not None else ""
         ax.text(
