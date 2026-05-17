@@ -1,3 +1,9 @@
+## v0.26.2 (2026-05-17)
+
+### Refactor
+
+- rename misleading helpers — _get / _kill_tag / _build_narrative (#71)
+
 ## v0.26.1 (2026-05-17)
 
 ### Fix
