@@ -1,3 +1,9 @@
+## v0.24.1 (2026-05-17)
+
+### Refactor
+
+- **package**: housekeeping — Popen leak fix, narrow excepts, hoist imports (#66)
+
 ## v0.24.0 (2026-05-17)
 
 ### Feat
