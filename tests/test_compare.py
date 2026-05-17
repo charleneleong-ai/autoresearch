@@ -666,6 +666,66 @@ def test_plot_milestone_bars_renders_threshold_lines(tmp_path: Path) -> None:
     assert any(abs(ln.get_ydata()[0] - 57.14) < 1e-6 for ln in hlines)
 
 
+def test_count_iters_per_score_groups_repeats() -> None:
+    """Stacked-dot helper: counts iters per unique score value so the
+    chart can annotate ``×N`` next to a dot hiding multiple iters."""
+    from autoresearch.compare import _count_iters_per_score
+
+    # Stage L pattern: 4 ceiling iters + 1 dropout
+    assert sorted(_count_iters_per_score([57.14, 57.14, 57.14, 28.57, 57.14])) == [
+        (28.57, 1),
+        (57.14, 4),
+    ]
+    # All distinct: every dot is its own (value, 1)
+    assert sorted(_count_iters_per_score([1.0, 2.0, 3.0])) == [(1.0, 1), (2.0, 1), (3.0, 1)]
+    # Empty list → empty
+    assert _count_iters_per_score([]) == []
+
+
+def test_plot_milestone_bars_value_format_controls_label(tmp_path: Path) -> None:
+    """``value_format`` is applied to the value label printed above each bar.
+    Default is ``'{:.2f}'``; passing ``'{:.2f}%'`` adds the percent sign."""
+    out = tmp_path / "fmt.png"
+    fig = plot_milestone_bars(
+        [Milestone(label="a", metrics={"score": 42.86}, verdict="FLAT")],
+        primary_metric="score",
+        value_format="{:.2f}%",
+        out_path=out,
+        return_fig=True,
+    )
+    label_texts = {t.get_text() for t in fig.axes[0].texts}
+    assert "42.86%" in label_texts
+    assert "42.86" not in label_texts  # bare value not rendered
+
+
+def test_metric_yerr_uses_min_max_when_scores_present() -> None:
+    """When metric_scores is populated, the error bar uses the actual
+    min/max range — symmetric ±std overshoots the observed data when
+    n is small and the distribution is skewed (e.g. Stage L's [57.14]×4
+    + [28.57]×1 gives mean=51.43, std=12.78, but mean+std=64.21 sits
+    above the actual max of 57.14)."""
+    from autoresearch.compare import _metric_yerr
+
+    ms = [
+        Milestone(
+            label="L",
+            metrics={"score": 51.43},
+            metric_stds={"score": 12.78},
+            metric_scores={"score": [57.14, 57.14, 57.14, 28.57, 57.14]},
+        ),
+        Milestone(label="P", metrics={"score": 57.14}, metric_stds={"score": 0.0}),
+        Milestone(label="bare", metrics={"score": 50.0}),
+    ]
+    lower, upper = _metric_yerr(ms, "score")
+    # L: mean - min = 51.43 - 28.57 = 22.86; max - mean = 57.14 - 51.43 = 5.71
+    assert lower[0] == pytest.approx(22.86, abs=0.01)
+    assert upper[0] == pytest.approx(5.71, abs=0.01)
+    # P: only std → symmetric (both = std)
+    assert lower[1] == 0.0 and upper[1] == 0.0
+    # bare: no std, no scores → no whisker (0.0 on both sides)
+    assert lower[2] == 0.0 and upper[2] == 0.0
+
+
 def test_score_dot_colors_marks_min_and_max() -> None:
     """Helper that color-codes per-iter scores: max breach → green,
     min collapse → red, middle scores → neutral. When all scores are

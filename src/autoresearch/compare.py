@@ -720,12 +720,23 @@ def _draw_metric_series(
     """
     drawn: list[tuple[str, str, Any]] = []
     first_valid: list[tuple[int, float]] = []
+    # Asymmetric yerr — uses min/max range when metric_scores is present
+    # for a milestone, falls back to ±std otherwise. Keeps the whisker caps
+    # honest with respect to the observed data range.
+    all_lower, all_upper = _metric_yerr(milestones, keys[0]) if keys else ([], [])
     for i, key in enumerate(keys):
         vals: list[float | None] = [m.metrics.get(key) for m in milestones]
-        # Align stds by milestone index; None where missing so error bars
-        # only render at points that have a std (mix-of-n=1-and-n>1 ok).
-        stds: list[float | None] = [m.metric_stds.get(key) for m in milestones]
-        valid = [(x, v, s) for x, v, s in zip(xs, vals, stds, strict=False) if v is not None]
+        # Per-milestone presence of any spread to draw — either metric_stds
+        # or metric_scores. Skips points with neither so the chart never
+        # draws a phantom zero-length bar.
+        has_spread = [(key in m.metric_stds) or bool(m.metric_scores.get(key)) for m in milestones]
+        if i != 0:
+            all_lower, all_upper = _metric_yerr(milestones, key)
+        valid = [
+            (x, v, lo, up, sp)
+            for x, v, lo, up, sp in zip(xs, vals, all_lower, all_upper, has_spread, strict=False)
+            if v is not None
+        ]
         if not valid:
             if i == 0 and require_first:
                 raise ValueError(f"no milestone has metric {key!r}")
@@ -733,24 +744,23 @@ def _draw_metric_series(
         color = palette[i % len(palette)]
         marker = markers[i % len(markers)]
         line = ax.plot(
-            [x for x, _, _ in valid],
-            [v for _, v, _ in valid],
+            [x for x, _, _, _, _ in valid],
+            [v for _, v, _, _, _ in valid],
             f"{linestyle}{marker}",
             color=color,
             linewidth=linewidth,
             markersize=markersize,
             label=f"{key} {label_suffix}",
         )[0]
-        # Per-point error bars where a std is available. Skip points
-        # without a std so the chart never draws a phantom zero-length bar.
-        err_xs = [x for x, _, s in valid if s is not None]
-        err_ys = [v for _, v, s in valid if s is not None]
-        err_es = [s for _, _, s in valid if s is not None]
+        err_xs = [x for x, _, _, _, sp in valid if sp]
+        err_ys = [v for _, v, _, _, sp in valid if sp]
+        err_lower = [lo for _, _, lo, _, sp in valid if sp]
+        err_upper = [up for _, _, _, up, sp in valid if sp]
         if err_xs:
             ax.errorbar(
                 err_xs,
                 err_ys,
-                yerr=err_es,
+                yerr=[err_lower, err_upper],
                 fmt="none",
                 ecolor=color,
                 elinewidth=linewidth * 0.6,
@@ -781,7 +791,7 @@ def _draw_metric_series(
         drawn.append((key, color, line))
         handles.append(line)
         if i == 0:
-            first_valid = [(x, v) for x, v, _ in valid]
+            first_valid = [(x, v) for x, v, _, _, _ in valid]
     return drawn, first_valid
 
 
@@ -993,6 +1003,54 @@ _DOT_MAX_COLOR = "#16a34a"  # green — best iter (often the breach)
 _DOT_MIN_COLOR = "#dc2626"  # red — worst iter (often the collapse)
 
 
+def _metric_yerr(milestones: Sequence[Milestone], key: str) -> tuple[list[float], list[float]]:
+    """Return (lower_err, upper_err) lists for asymmetric matplotlib yerr.
+
+    When ``metric_scores[key]`` is populated, the error bar uses the
+    actual observed range (mean−min, max−mean) so the whisker caps sit
+    exactly on the data — never above the highest iter. With small n
+    and a skewed distribution, ±std overshoots the range (a 5-iter
+    [57.14]×4 + [28.57]×1 has mean=51.43, std=12.78, so mean+std=64.21
+    sits *above* the actual max 57.14, implying a phantom upper tail).
+
+    Falls back to symmetric ±std when only ``metric_stds[key]`` is given.
+    Returns (0.0, 0.0) for the milestone when neither is available.
+    """
+    lower: list[float] = []
+    upper: list[float] = []
+    for m in milestones:
+        mean = m.metrics.get(key)
+        if mean is None:
+            lower.append(0.0)
+            upper.append(0.0)
+            continue
+        raw = m.metric_scores.get(key)
+        if raw:
+            lower.append(mean - min(raw))
+            upper.append(max(raw) - mean)
+        else:
+            std = m.metric_stds.get(key, 0.0)
+            lower.append(std)
+            upper.append(std)
+    return lower, upper
+
+
+def _count_iters_per_score(scores: Sequence[float]) -> list[tuple[float, int]]:
+    """Count how many iters landed on each unique score value.
+
+    Returns ``[(value, iter_count), ...]`` — one entry per distinct
+    value in ``scores``, with the number of iters that hit it. The
+    chart uses this to render a single dot per value and annotate
+    ``×N`` when ``iter_count > 1`` so multiple iters landing on the
+    same score (e.g. Stage L's 4× ceiling iters at 57.14) don't
+    collapse to a lone dot and silently hide the other 3 data points.
+    """
+    counts: dict[float, int] = {}
+    for v in scores:
+        counts[v] = counts.get(v, 0) + 1
+    return list(counts.items())
+
+
 def _score_dot_colors(scores: Sequence[float], *, neutral: str) -> list[str]:
     """Color-code per-iter dots: max → green, min → red, middle → neutral.
 
@@ -1030,6 +1088,7 @@ def plot_milestone_bars(
     ylabel: str | None = None,
     pending_value: float | None = None,
     show_descriptions: bool = True,
+    value_format: str = "{:.2f}",
     figsize: tuple[float, float] = (13.0, 7.0),
     dpi: int = 140,
     return_fig: bool = False,
@@ -1065,7 +1124,6 @@ def plot_milestone_bars(
 
     labels = [m.label for m in milestones]
     means = [m.metrics[primary_metric] for m in milestones]
-    stds = [m.metric_stds.get(primary_metric, 0.0) for m in milestones]
     verdicts = [m.verdict or "FLAT" for m in milestones]
     descriptions = [m.description for m in milestones]
     ns = [m.n for m in milestones]
@@ -1084,14 +1142,18 @@ def plot_milestone_bars(
     plot_means = [
         placeholder_h if v == "PENDING" else m for v, m in zip(verdicts, means, strict=False)
     ]
-    plot_stds = [0.0 if v == "PENDING" else s for v, s in zip(verdicts, stds, strict=False)]
+    # Asymmetric yerr — uses min/max range when metric_scores is present,
+    # falls back to ±std otherwise. PENDING rows render with no whisker.
+    err_lower, err_upper = _metric_yerr(milestones, primary_metric)
+    err_lower = [0.0 if v == "PENDING" else e for v, e in zip(verdicts, err_lower, strict=False)]
+    err_upper = [0.0 if v == "PENDING" else e for v, e in zip(verdicts, err_upper, strict=False)]
     hatches = ["//" if v == "PENDING" else None for v in verdicts]
     alphas = [0.45 if v == "PENDING" else 1.0 for v in verdicts]
 
     bars = ax.bar(
         xs,
         plot_means,
-        yerr=plot_stds,
+        yerr=[err_lower, err_upper],
         capsize=4,
         color=colors,
         edgecolor="white",
@@ -1104,27 +1166,67 @@ def plot_milestone_bars(
 
     # Per-iter scatter overlay (same machinery as plot_milestone_progression).
     # Min/max are colour-coded (red/green) so a glance distinguishes a
-    # breach iter from a collapse iter at the chart level.
+    # breach iter from a collapse iter at the chart level. Repeated iters
+    # at the same value collapse to a single dot with an ``×N`` badge so
+    # the chart doesn't silently hide stacked data points.
     for x, m in zip(xs, milestones, strict=False):
         raw = m.metric_scores.get(primary_metric)
         if not raw:
             continue
+        iters_per_score = _count_iters_per_score(raw)
+        unique_vals = [v for v, _ in iters_per_score]
+        colors = _score_dot_colors(unique_vals, neutral="black")
         ax.scatter(
-            [x] * len(raw),
-            raw,
-            c=_score_dot_colors(raw, neutral="black"),
+            [x] * len(unique_vals),
+            unique_vals,
+            c=colors,
             s=85,
             edgecolor="white",
             linewidth=1.6,
             zorder=5,
         )
+        for (value, iter_count), color in zip(iters_per_score, colors, strict=False):
+            if iter_count > 1:
+                ax.annotate(
+                    f"×{iter_count}",
+                    xy=(x, value),
+                    xytext=(9, 0),
+                    textcoords="offset points",
+                    ha="left",
+                    va="center",
+                    fontsize=8,
+                    fontweight="bold",
+                    color=color,
+                    zorder=6,
+                )
 
-    for x, m, s, v, n in zip(xs, means, stds, verdicts, ns, strict=False):
-        top = placeholder_h if v == "PENDING" else m + (s or 0.0)
+    for x, m, v, n in zip(xs, means, verdicts, ns, strict=False):
         if v == "PENDING":
-            ax.text(x, top + 1.8, "TBD", ha="center", fontsize=10, fontweight="bold", color="#666")
+            ax.text(
+                x,
+                placeholder_h + 1.8,
+                "TBD",
+                ha="center",
+                fontsize=10,
+                fontweight="bold",
+                color="#666",
+            )
         else:
-            ax.text(x, top + 1.8, f"{m:.2f}", ha="center", fontsize=10, fontweight="bold")
+            # Anchor the value label just above the mean bar top — the
+            # number reads "near the mean", not at the top of the
+            # whisker (which is the max, not the mean). White bbox masks
+            # the whisker line passing behind the text for asymmetric
+            # error bars where mean + 1.8 lands inside the whisker range.
+            ax.text(
+                x,
+                m + 1.8,
+                value_format.format(m),
+                ha="center",
+                fontsize=10,
+                fontweight="bold",
+                zorder=6,
+                bbox=dict(facecolor="white", edgecolor="none", pad=1.0),
+            )
         n_label = f"  n={n}" if n is not None else ""
         ax.text(
             x,
@@ -1149,7 +1251,7 @@ def plot_milestone_bars(
             color=t["color"],
         )
 
-    ax.set_ylim(0, max(placeholder_h + 8, max(plot_means + plot_stds) + 10))
+    ax.set_ylim(0, max(placeholder_h + 8, max(plot_means + err_upper) + 10))
     ax.set_xlim(-0.6, len(labels) - 0.4)
     ax.set_ylabel(ylabel or primary_metric, fontsize=10)
     ax.set_xticks(xs)
