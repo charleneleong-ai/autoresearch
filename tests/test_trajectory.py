@@ -518,3 +518,95 @@ def test_extract_returns_itmetrics_dataclass(tmp_path: Path) -> None:
     )
     assert isinstance(m, IterMetrics)
     assert m.run_id == tmp_path.name
+
+
+# ── introspect_cli --format json ───────────────────────────────────────
+
+
+from typer.testing import CliRunner  # noqa: E402
+
+from autoresearch.introspect_cli import app  # noqa: E402
+
+_runner = CliRunner()
+
+
+def _make_adapter_module(tmp_path: Path) -> str:
+    """Write a minimal adapter .py into tmp_path and return its dotted module path."""
+    adapter_dir = tmp_path / "fake_adapter_pkg"
+    adapter_dir.mkdir()
+    (adapter_dir / "__init__.py").write_text("")
+
+    def _gi(row: dict) -> dict:
+        return row.get("obs", {}).get("game_info", {})
+
+    code_lines = [
+        "from autoresearch.trajectory import MilestoneSpec",
+        "def _gi(r): return r.get('obs', {}).get('game_info', {})",
+        "TRAJECTORY_MILESTONES = [MilestoneSpec('M1', lambda r: _gi(r).get('score', 0) >= 1)]",
+        "TRAJECTORY_SCORE_EXTRACTOR = lambda r: float(_gi(r).get('score', 0))",
+        "TRAJECTORY_ZONE_EXTRACTOR = lambda r: _gi(r).get('map_name', '?') or '?'",
+        "TRAJECTORY_SCORE_MAX = 1.0",
+    ]
+    (adapter_dir / "adapter.py").write_text("\n".join(code_lines) + "\n")
+    return "fake_adapter_pkg.adapter"
+
+
+def test_introspect_cli_format_json_emits_valid_json(tmp_path: Path) -> None:
+    import sys
+
+    # build one iter dir with a single game_states.jsonl row
+    iter_dir = tmp_path / "runs" / "iter_1"
+    iter_dir.mkdir(parents=True)
+    row = {"obs": {"game_info": {"score": 1, "map_name": "Route1"}}, "action": "look"}
+    (iter_dir / "game_states.jsonl").write_text(json.dumps(row) + "\n")
+
+    adapter_mod = _make_adapter_module(tmp_path)
+    sys.path.insert(0, str(tmp_path))
+    try:
+        result = _runner.invoke(
+            app,
+            [
+                "--run",
+                f"S:{tmp_path / 'runs'}:iter_*",
+                "--adapter",
+                adapter_mod,
+                "--format",
+                "json",
+            ],
+        )
+    finally:
+        sys.path.pop(0)
+
+    assert result.exit_code == 0, result.output
+    parsed = json.loads(result.output)
+    assert isinstance(parsed, list)
+    assert parsed[0]["label"] == "S"
+    iters = parsed[0]["iters"]
+    assert len(iters) == 1
+    assert iters[0]["run_id"] == "iter_1"
+    assert iters[0]["score_pct"] == 100.0
+    assert iters[0]["first_milestone_step"]["M1"] == 0
+    assert "mean_score_pct" in parsed[0]
+
+
+def test_introspect_cli_format_text_is_default(tmp_path: Path) -> None:
+    import sys
+
+    iter_dir = tmp_path / "runs" / "iter_2"
+    iter_dir.mkdir(parents=True)
+    row = {"obs": {"game_info": {"score": 0, "map_name": "Pallet"}}, "action": "look"}
+    (iter_dir / "game_states.jsonl").write_text(json.dumps(row) + "\n")
+
+    adapter_mod = _make_adapter_module(tmp_path)
+    sys.path.insert(0, str(tmp_path))
+    try:
+        result = _runner.invoke(
+            app,
+            ["--run", f"T:{tmp_path / 'runs'}:iter_*", "--adapter", adapter_mod],
+        )
+    finally:
+        sys.path.pop(0)
+
+    assert result.exit_code == 0, result.output
+    assert "══════" in result.output  # text table header
+    assert "final=" in result.output
