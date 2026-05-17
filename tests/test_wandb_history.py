@@ -55,6 +55,37 @@ def test_parse_invalid_raises() -> None:
         parse_run_url("a/b")  # only 2 segments — not enough
 
 
+def test_fetch_history_wraps_wandb_errors_as_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """wandb's Api(), api.run(), and run.history() raise an undocumented mix
+    (UsageError on missing creds, CommError on network, etc.). The wandb_history
+    boundary wraps them all as RuntimeError so callers can `except (RuntimeError,
+    ValueError):` without leaking wandb's exception zoo upstream."""
+    import sys
+    import types
+
+    class FakeUsageError(Exception):
+        """Stand-in for wandb.errors.UsageError — neither ValueError nor RuntimeError."""
+
+    class FakeApi:
+        def run(self, path: str) -> object:
+            raise FakeUsageError("api_key not configured. call wandb.login()")
+
+    fake_public = types.ModuleType("wandb.apis.public")
+    fake_public.Api = FakeApi
+    fake_apis = types.ModuleType("wandb.apis")
+    fake_wandb = types.ModuleType("wandb")
+    monkeypatch.setitem(sys.modules, "wandb", fake_wandb)
+    monkeypatch.setitem(sys.modules, "wandb.apis", fake_apis)
+    monkeypatch.setitem(sys.modules, "wandb.apis.public", fake_public)
+
+    from autoresearch.wandb_history import fetch_history
+
+    with pytest.raises(RuntimeError, match="wandb fetch failed"):
+        fetch_history(run_url="charlene/orak/abc", keys=["train/loss"])
+
+
 def test_fetch_history_raises_import_error_when_wandb_missing() -> None:
     """If `import wandb` fails, fetch_history should re-raise ImportError with
     a helpful install hint. We rely on wandb genuinely being uninstalled in

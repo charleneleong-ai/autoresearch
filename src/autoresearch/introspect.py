@@ -44,7 +44,6 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import json
-import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -107,12 +106,7 @@ def main(
     output: list[dict] = []
 
     for spec in runs:
-        try:
-            label, base, glob = _parse_run(spec)
-        except typer.BadParameter as e:
-            typer.echo(str(e), err=True)
-            raise typer.Exit(1) from e
-
+        label, base, glob = _parse_run(spec)
         iter_dirs = sorted(d for d in base.glob(glob) if d.is_dir())
         rows = [extract_iter_metrics(d, **kwargs) for d in iter_dirs]
         milestone_names = list(rows[0].first_milestone_step.keys()) if rows else []
@@ -174,4 +168,4 @@ def cli() -> None:
 
 
 if __name__ == "__main__":
-    sys.exit(app())
+    app()

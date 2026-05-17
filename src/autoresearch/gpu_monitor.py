@@ -95,7 +95,7 @@ def _nvidia_smi_sample() -> GPUSample | None:
             mem_used_gb=round(int(used) / 1024, 2),
             mem_total_gb=round(int(total) / 1024, 2),
         )
-    except Exception:
+    except (subprocess.SubprocessError, OSError, ValueError, IndexError):
         return None
 
 

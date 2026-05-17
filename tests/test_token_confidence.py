@@ -7,9 +7,11 @@ import math
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from autoresearch.token_confidence import (
     Sample,
+    app,
     bucket_by_failure,
     load_per_row_logprobs,
     plot_confidence_distribution,
@@ -211,10 +213,6 @@ def test_load_handles_empty_file(tmp_path: Path) -> None:
 
 def test_cli_summary_smoke(per_row_path: Path, tmp_path: Path) -> None:
     """End-to-end CLI smoke via typer's CliRunner."""
-    from typer.testing import CliRunner
-
-    from autoresearch.token_confidence import app
-
     runner = CliRunner()
     result = runner.invoke(
         app,

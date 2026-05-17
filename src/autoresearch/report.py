@@ -39,6 +39,8 @@ from typing import Any
 import typer
 import yaml
 
+from autoresearch.results import load_results
+
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 # Chassis fields we look up from a training config + its Hydra defaults chain.
@@ -326,8 +328,6 @@ def main(
     if config_yaml is None:
         config_yaml = _autodetect_config_yaml(schedule, config)
     chassis = _extract_chassis(config_yaml)
-
-    from autoresearch.results import load_results
 
     results = load_results(experiments_dir=experiments_dir, tag=tag, config_name=config)
 

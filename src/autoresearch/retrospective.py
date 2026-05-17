@@ -409,10 +409,12 @@ def _gradient_collapse(ctx: IterContext) -> Finding | None:
 
     try:
         series = fetch_history(run_url=str(wandb_url), keys=[loss_key, reward_key], samples=samples)
-    except Exception:
-        # Bad URL, API failure, missing credentials (wandb.errors.UsageError),
-        # network timeout — anything fetch_history might raise. The detector's
-        # contract is "silently skip if I can't run", not "crash the sweep".
+    except (RuntimeError, ValueError):
+        # fetch_history's documented contract: ValueError for bad URL,
+        # RuntimeError wrapping wandb API failures (CommError, missing
+        # credentials, run not found). The detector's contract is "silently
+        # skip if I can't run", not "crash the sweep" — anything outside
+        # this set is a real bug worth surfacing.
         return None
 
     loss = series.get(loss_key, [])
@@ -573,7 +575,10 @@ def _score_transforms(
         for (cited, truth), idx in zip(pairs, sample_indices, strict=False):
             try:
                 transformed = tfn(truth)
-            except Exception:
+            except (ArithmeticError, TypeError, ValueError):
+                # Numeric transforms can hit div-by-zero / overflow
+                # (ArithmeticError), wrong types (TypeError), or domain errors
+                # like sqrt(-1) (ValueError). Skip the row and keep counting.
                 continue
             if matches(cited, transformed):
                 count += 1
