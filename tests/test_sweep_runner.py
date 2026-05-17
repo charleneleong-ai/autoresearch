@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from autoresearch.results import load_results
+from autoresearch.results import load_results, log_experiment
 from autoresearch.retrospective import Finding, RetrospectiveSpec
 from autoresearch.sweep_runner import (
     IterOutcome,
@@ -653,8 +653,6 @@ def test_prelogged_rows_are_not_duplicated(
     mock_popen.return_value = _mock_popen()
 
     def extract_prelogged(plan: IterPlan, run_id: str | None, ec: int) -> list[dict]:
-        from autoresearch.results import log_experiment
-
         log_experiment(
             experiments_dir=tmp_path,
             tag="test",

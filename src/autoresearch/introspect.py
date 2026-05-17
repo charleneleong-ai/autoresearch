@@ -44,7 +44,6 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import json
-import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -174,4 +173,4 @@ def cli() -> None:
 
 
 if __name__ == "__main__":
-    sys.exit(app())
+    app()

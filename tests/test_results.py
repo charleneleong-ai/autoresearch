@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -23,11 +24,13 @@ from autoresearch.results import (
     STATUS_DISCARD,
     STATUS_KEEP,
     categorize_kill_reason,
+    consolidate,
     decide_status,
     filter_by_game,
     get_score,
     load_results,
     log_experiment,
+    read_jsonl,
     tag_dir,
 )
 
@@ -287,10 +290,8 @@ def test_extra_classifier_wins_when_returns_tuple() -> None:
 
 
 def test_extra_classifier_extras_passthrough() -> None:
-    import re as _re
-
     def extra(kr: str) -> tuple[str, dict[str, str]] | None:
-        m = _re.search(r"retry-after=([\d.]+)", kr)
+        m = re.search(r"retry-after=([\d.]+)", kr)
         if "wandb 429" in kr:
             return "wandb_throttle", ({"retry_after": m.group(1)} if m else {})
         return None
@@ -472,8 +473,6 @@ def _write_jsonl(path, rows):
 def test_consolidate_aggregates_multiple_sweep_dirs(tmp_path):
     """Multiple per-sweep results.jsonl files → single jsonl with
     all rows + a _source_path field showing where each came from."""
-    from autoresearch.results import consolidate
-
     _write_jsonl(
         tmp_path / "pokemon_sweep/gemma_26b/results.jsonl",
         [
@@ -498,8 +497,6 @@ def test_consolidate_aggregates_multiple_sweep_dirs(tmp_path):
 
 def test_consolidate_handles_missing_and_empty_dirs(tmp_path):
     """Empty dirs / missing results.jsonl are skipped silently."""
-    from autoresearch.results import consolidate
-
     (tmp_path / "empty_sweep" / "gemma_26b").mkdir(parents=True)
     _write_jsonl(
         tmp_path / "real_sweep/gemma_26b/results.jsonl",
@@ -512,8 +509,6 @@ def test_consolidate_handles_missing_and_empty_dirs(tmp_path):
 
 def test_consolidate_filters_by_prefix(tmp_path):
     """include_prefixes keeps only sweep dirs whose name starts with one of the prefixes."""
-    from autoresearch.results import consolidate
-
     _write_jsonl(
         tmp_path / "keep_alpha/gemma_26b/results.jsonl",
         [{"variant": "a", "game": "g", "evaluation_score": 1.0}],
@@ -531,8 +526,6 @@ def test_consolidate_filters_by_prefix(tmp_path):
 
 def test_consolidate_dedupes_via_symlinks(tmp_path):
     """Two dirs pointing at the same physical file (via symlink) count once."""
-    from autoresearch.results import consolidate
-
     canonical = tmp_path / "canonical/gemma_26b/results.jsonl"
     _write_jsonl(
         canonical,
@@ -549,8 +542,6 @@ def test_consolidate_dedupes_via_symlinks(tmp_path):
 
 def test_consolidate_source_path_is_absolute(tmp_path):
     """`_source_path` must be a resolved absolute path, not CWD-dependent."""
-    from autoresearch.results import consolidate
-
     _write_jsonl(
         tmp_path / "s/c/results.jsonl",
         [{"variant": "x", "game": "g", "evaluation_score": 1.0}],
@@ -565,8 +556,6 @@ def test_consolidate_source_path_is_absolute(tmp_path):
 
 def test_consolidate_supports_flat_layout(tmp_path):
     """Flat-layout `<root>/<tag>/results.jsonl` (no per-config subdir) is included."""
-    from autoresearch.results import consolidate
-
     _write_jsonl(
         tmp_path / "flat_sweep/results.jsonl",  # no per-config layer
         [{"variant": "a", "game": "g", "evaluation_score": 1.0}],
@@ -586,15 +575,11 @@ def test_consolidate_supports_flat_layout(tmp_path):
 
 
 def test_read_jsonl_returns_empty_for_missing_path(tmp_path):
-    from autoresearch.results import read_jsonl
-
     assert read_jsonl(None) == []
     assert read_jsonl(tmp_path / "nope.jsonl") == []
 
 
 def test_read_jsonl_skips_blanks_and_corrupt_lines(tmp_path):
-    from autoresearch.results import read_jsonl
-
     p = tmp_path / "results.jsonl"
     p.write_text('{"a": 1}\n\nnot json\n{"a": 2}\n')
     rows = read_jsonl(p)
