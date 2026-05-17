@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from autoresearch.introspect import app
@@ -15,22 +17,21 @@ _runner = CliRunner()
 
 def _make_adapter_module(tmp_path: Path) -> str:
     """Write a minimal adapter .py into tmp_path and return its dotted module path."""
-    adapter_dir = tmp_path / "fake_adapter_pkg"
-    adapter_dir.mkdir()
-    (adapter_dir / "__init__.py").write_text("")
-    code_lines = [
-        "from autoresearch.trajectory import MilestoneSpec",
-        "def _gi(r): return r.get('obs', {}).get('game_info', {})",
-        "TRAJECTORY_MILESTONES = [MilestoneSpec('M1', lambda r: _gi(r).get('score', 0) >= 1)]",
-        "TRAJECTORY_SCORE_EXTRACTOR = lambda r: float(_gi(r).get('score', 0))",
-        "TRAJECTORY_ZONE_EXTRACTOR = lambda r: _gi(r).get('map_name', '?') or '?'",
-        "TRAJECTORY_SCORE_MAX = 1.0",
-    ]
-    (adapter_dir / "adapter.py").write_text("\n".join(code_lines) + "\n")
+    pkg = tmp_path / "fake_adapter_pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "adapter.py").write_text(
+        "from autoresearch.trajectory import MilestoneSpec\n"
+        "def _gi(r): return r.get('obs', {}).get('game_info', {})\n"
+        "TRAJECTORY_MILESTONES = [MilestoneSpec('M1', lambda r: _gi(r).get('score', 0) >= 1)]\n"
+        "TRAJECTORY_SCORE_EXTRACTOR = lambda r: float(_gi(r).get('score', 0))\n"
+        "TRAJECTORY_ZONE_EXTRACTOR = lambda r: _gi(r).get('map_name', '?') or '?'\n"
+        "TRAJECTORY_SCORE_MAX = 1.0\n"
+    )
     return "fake_adapter_pkg.adapter"
 
 
-def _make_iter_dir(base: Path, name: str, score: int, map_name: str) -> Path:
+def _make_iter_dir(base: Path, name: str, *, score: int, map_name: str) -> Path:
     d = base / name
     d.mkdir(parents=True)
     row = {"obs": {"game_info": {"score": score, "map_name": map_name}}, "action": "look"}
@@ -38,28 +39,34 @@ def _make_iter_dir(base: Path, name: str, score: int, map_name: str) -> Path:
     return d
 
 
-def test_format_json_emits_valid_json(tmp_path: Path) -> None:
-    _make_iter_dir(tmp_path / "runs", "iter_1", score=1, map_name="Route1")
-    adapter_mod = _make_adapter_module(tmp_path)
-    sys.path.insert(0, str(tmp_path))
+@contextmanager
+def _on_path(p: Path):
+    sys.path.insert(0, str(p))
     try:
-        result = _runner.invoke(
-            app,
-            [
-                "--run",
-                f"S:{tmp_path / 'runs'}:iter_*",
-                "--adapter",
-                adapter_mod,
-                "--format",
-                "json",
-            ],
-        )
+        yield
     finally:
         sys.path.pop(0)
 
+
+@pytest.fixture
+def adapter(tmp_path: Path):
+    """Yields (adapter_module_str, runs_dir) with tmp_path on sys.path."""
+    mod = _make_adapter_module(tmp_path)
+    runs = tmp_path / "runs"
+    with _on_path(tmp_path):
+        yield mod, runs
+
+
+def test_format_json_emits_valid_json(adapter) -> None:
+    mod, runs = adapter
+    _make_iter_dir(runs, "iter_1", score=1, map_name="Route1")
+
+    result = _runner.invoke(
+        app, ["--run", f"S:{runs}:iter_*", "--adapter", mod, "--format", "json"]
+    )
+
     assert result.exit_code == 0, result.output
     parsed = json.loads(result.output)
-    assert isinstance(parsed, list)
     assert parsed[0]["label"] == "S"
     iters = parsed[0]["iters"]
     assert len(iters) == 1
@@ -69,17 +76,11 @@ def test_format_json_emits_valid_json(tmp_path: Path) -> None:
     assert "mean_score_pct" in parsed[0]
 
 
-def test_format_text_is_default(tmp_path: Path) -> None:
-    _make_iter_dir(tmp_path / "runs", "iter_2", score=0, map_name="Pallet")
-    adapter_mod = _make_adapter_module(tmp_path)
-    sys.path.insert(0, str(tmp_path))
-    try:
-        result = _runner.invoke(
-            app,
-            ["--run", f"T:{tmp_path / 'runs'}:iter_*", "--adapter", adapter_mod],
-        )
-    finally:
-        sys.path.pop(0)
+def test_format_text_is_default(adapter) -> None:
+    mod, runs = adapter
+    _make_iter_dir(runs, "iter_1", score=0, map_name="Pallet")
+
+    result = _runner.invoke(app, ["--run", f"T:{runs}:iter_*", "--adapter", mod])
 
     assert result.exit_code == 0, result.output
     assert "══════" in result.output
