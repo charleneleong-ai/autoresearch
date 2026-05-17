@@ -367,3 +367,154 @@ def test_format_recent_history_action_truncated_at_60_chars() -> None:
     out = format_recent_history(records)
     assert "z" * 60 in out
     assert "z" * 61 not in out
+
+
+# ── extract_iter_metrics ───────────────────────────────────────────────
+
+import re  # noqa: E402
+
+from autoresearch.trajectory import (  # noqa: E402
+    ActionSpec,
+    DwellSpec,
+    IterMetrics,
+    MilestoneSpec,
+    extract_iter_metrics,
+)
+
+_MOVE_TO_RE = re.compile(r"move_to[^()]*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)")
+
+# --- helpers shared by all extract_iter_metrics tests ---
+
+
+def _score(row: dict) -> float:
+    gi = row.get("obs", {}).get("game_info", {})
+    try:
+        return float(int(gi.get("score", 0)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _zone(row: dict) -> str:
+    return row.get("obs", {}).get("game_info", {}).get("map_name", "?") or "?"
+
+
+def _move_target(row: dict) -> tuple[int, int] | None:
+    s = row.get("action", "")
+    m = _MOVE_TO_RE.search(s)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+_MILESTONES = [MilestoneSpec(f"M{i}", lambda row, i=i: _score(row) >= i) for i in range(1, 4)]
+_DWELL = [
+    DwellSpec("Route1", lambda row: _zone(row) == "Route1"),
+    DwellSpec("Viridian", lambda row: "Viridian" in _zone(row)),
+]
+_ACTION_SPEC = ActionSpec(extract_target=_move_target)
+
+
+def _write_gs(tmp_path: Path, rows: list[dict]) -> Path:
+    (tmp_path / "game_states.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+    return tmp_path
+
+
+# --- tests ---
+
+
+def test_extract_basic_milestones_and_dwell(tmp_path: Path) -> None:
+    rows = [
+        {"obs": {"game_info": {"score": 0, "map_name": "PalletTown"}}, "action": "look"},
+        {"obs": {"game_info": {"score": 1, "map_name": "Route1"}}, "action": "move_to(5, 3)"},
+        {"obs": {"game_info": {"score": 2, "map_name": "Route1"}}, "action": "move_to(6, 3)"},
+        {"obs": {"game_info": {"score": 2, "map_name": "ViridianCity"}}, "action": "move_to(6, 3)"},
+    ]
+    m = extract_iter_metrics(
+        _write_gs(tmp_path, rows),
+        milestone_specs=_MILESTONES,
+        dwell_specs=_DWELL,
+        action_spec=_ACTION_SPEC,
+        score_extractor=_score,
+        zone_extractor=_zone,
+        score_max=3.0,
+    )
+    assert m.error is None
+    assert m.total_steps == 4
+    assert m.first_milestone_step == {"M1": 1, "M2": 2, "M3": None}
+    assert m.dwell_counts["Route1"] == 2
+    assert m.dwell_counts["Viridian"] == 1
+    assert m.action_count == 3
+    assert m.final_zone == "ViridianCity"
+    assert abs(m.score_pct - 2.0 / 3.0 * 100) < 0.1
+
+
+def test_extract_perseveration(tmp_path: Path) -> None:
+    rows = [
+        {"obs": {"game_info": {"score": 0, "map_name": "A"}}, "action": "move_to(1, 1)"},
+        {"obs": {"game_info": {"score": 0, "map_name": "A"}}, "action": "move_to(1, 1)"},
+        {"obs": {"game_info": {"score": 0, "map_name": "A"}}, "action": "move_to(2, 2)"},
+        {"obs": {"game_info": {"score": 0, "map_name": "A"}}, "action": "move_to(2, 2)"},
+    ]
+    m = extract_iter_metrics(
+        _write_gs(tmp_path, rows),
+        milestone_specs=[],
+        action_spec=_ACTION_SPEC,
+        score_extractor=_score,
+        zone_extractor=_zone,
+        score_max=1.0,
+    )
+    # 2 repeats out of 3 consecutive pairs = 66.7 %
+    assert abs(m.perseveration_pct - 66.7) < 0.2
+
+
+def test_extract_missing_game_states(tmp_path: Path) -> None:
+    m = extract_iter_metrics(
+        tmp_path,
+        milestone_specs=[],
+        score_extractor=_score,
+        zone_extractor=_zone,
+        score_max=1.0,
+    )
+    assert m.error is not None
+    assert "game_states.jsonl" in m.error
+
+
+def test_extract_evaluation_summary_overrides_score(tmp_path: Path) -> None:
+    rows = [{"obs": {"game_info": {"score": 2, "map_name": "A"}}, "action": "look"}]
+    _write_gs(tmp_path, rows)
+    (tmp_path / "evaluation_summary.json").write_text(
+        json.dumps({"episodes": [{"final_score": 5.0}]})
+    )
+    m = extract_iter_metrics(
+        tmp_path,
+        milestone_specs=[],
+        score_extractor=_score,
+        zone_extractor=_zone,
+        score_max=7.0,
+    )
+    assert m.final_score == 5.0
+    assert abs(m.score_pct - 5.0 / 7.0 * 100) < 0.1
+
+
+def test_extract_no_actions_yields_zero_perseveration(tmp_path: Path) -> None:
+    rows = [{"obs": {"game_info": {"score": 0, "map_name": "A"}}, "action": "look"}]
+    m = extract_iter_metrics(
+        _write_gs(tmp_path, rows),
+        milestone_specs=[],
+        score_extractor=_score,
+        zone_extractor=_zone,
+        score_max=1.0,
+    )
+    assert m.perseveration_pct == 0.0
+    assert m.action_count == 0
+
+
+def test_extract_returns_itmetrics_dataclass(tmp_path: Path) -> None:
+    rows = [{"obs": {"game_info": {"score": 0, "map_name": "X"}}, "action": "look"}]
+    m = extract_iter_metrics(
+        _write_gs(tmp_path, rows),
+        milestone_specs=_MILESTONES,
+        score_extractor=_score,
+        zone_extractor=_zone,
+        score_max=3.0,
+    )
+    assert isinstance(m, IterMetrics)
+    assert m.run_id == tmp_path.name

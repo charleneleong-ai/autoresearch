@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -251,10 +252,153 @@ class TrajectoryWriter:
         return target
 
 
+# ── Post-hoc trajectory introspection ────────────────────────────────────
+
+
+@dataclass
+class MilestoneSpec:
+    """Predicate that fires the first time a game_states.jsonl row crosses a milestone."""
+
+    name: str
+    predicate: Callable[[dict[str, Any]], bool]
+
+
+@dataclass
+class DwellSpec:
+    """Predicate for counting how many steps the agent spent in a named zone."""
+
+    name: str
+    predicate: Callable[[dict[str, Any]], bool]
+
+
+@dataclass
+class ActionSpec:
+    """Extracts a hashable target from an action row for perseveration counting."""
+
+    extract_target: Callable[[dict[str, Any]], tuple | None]
+
+
+@dataclass
+class IterMetrics:
+    """Per-iter metrics extracted from a ``game_states.jsonl`` run directory."""
+
+    run_id: str
+    total_steps: int
+    final_score: float
+    score_pct: float
+    first_milestone_step: dict[str, int | None]
+    dwell_counts: dict[str, int]
+    action_count: int
+    perseveration_pct: float
+    final_zone: str
+    error: str | None = None
+
+
+def extract_iter_metrics(
+    run_dir: Path,
+    *,
+    milestone_specs: list[MilestoneSpec],
+    dwell_specs: list[DwellSpec] | None = None,
+    action_spec: ActionSpec | None = None,
+    score_extractor: Callable[[dict[str, Any]], float],
+    zone_extractor: Callable[[dict[str, Any]], str],
+    score_max: float = 1.0,
+) -> IterMetrics:
+    """Extract per-iter behavioural metrics from a ``game_states.jsonl`` run dir.
+
+    The generic framework:
+    - ``milestone_specs`` — adapter-supplied predicates for first-bank detection.
+    - ``dwell_specs``    — adapter-supplied zone predicates for map-dwell counts.
+    - ``action_spec``   — adapter-supplied target extractor for perseveration.
+    - ``score_extractor`` / ``zone_extractor`` — pull score + zone from each row.
+
+    Pokemon-specific milestones / zones live in ``game_adapter.TRAJECTORY_MILESTONES``
+    etc.; Mario / 2048 ship their own adapter blocks.
+    """
+    from collections import Counter
+
+    gs = run_dir / "game_states.jsonl"
+    if not gs.exists():
+        return IterMetrics(
+            run_id=run_dir.name,
+            total_steps=0,
+            final_score=0.0,
+            score_pct=0.0,
+            first_milestone_step={s.name: None for s in milestone_specs},
+            dwell_counts={s.name: 0 for s in (dwell_specs or [])},
+            action_count=0,
+            perseveration_pct=0.0,
+            final_zone="?",
+            error="no game_states.jsonl",
+        )
+
+    lines = gs.read_text().splitlines()
+    first_ms: dict[str, int | None] = {s.name: None for s in milestone_specs}
+    dwell: Counter[str] = Counter()
+    targets: list[tuple] = []
+    final_zone = "?"
+    final_score = 0.0
+
+    for i, raw in enumerate(lines):
+        try:
+            row = json.loads(raw)
+        except Exception:
+            continue
+
+        for spec in milestone_specs:
+            if first_ms[spec.name] is None and spec.predicate(row):
+                first_ms[spec.name] = i
+
+        for spec in dwell_specs or []:
+            if spec.predicate(row):
+                dwell[spec.name] += 1
+
+        if action_spec is not None:
+            t = action_spec.extract_target(row)
+            if t is not None:
+                targets.append(t)
+
+        final_zone = zone_extractor(row)
+        final_score = score_extractor(row)
+
+    summ = run_dir / "evaluation_summary.json"
+    if summ.exists():
+        try:
+            ep = json.load(summ.open()).get("episodes", [{}])[0]
+            fs = ep.get("final_score")
+            if fs is not None:
+                final_score = float(fs)
+        except Exception:
+            pass
+
+    if len(targets) > 1:
+        repeats = sum(1 for j in range(1, len(targets)) if targets[j] == targets[j - 1])
+        perseveration = repeats / max(len(targets) - 1, 1) * 100
+    else:
+        perseveration = 0.0
+
+    return IterMetrics(
+        run_id=run_dir.name,
+        total_steps=len(lines),
+        final_score=final_score,
+        score_pct=round(final_score / score_max * 100, 2) if score_max else 0.0,
+        first_milestone_step=first_ms,
+        dwell_counts={s.name: dwell[s.name] for s in (dwell_specs or [])},
+        action_count=len(targets),
+        perseveration_pct=round(perseveration, 1),
+        final_zone=final_zone,
+    )
+
+
 __all__ = [
+    "ActionSpec",
+    "DwellSpec",
+    "IterMetrics",
+    "MilestoneSpec",
     "StepRecord",
     "TrajectoryWriter",
     "convert_scratchpad_to_think",
+    "extract_iter_metrics",
     "format_recent_history",
     "has_incomplete_scratchpad",
 ]
