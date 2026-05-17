@@ -1,3 +1,9 @@
+## v0.26.0 (2026-05-17)
+
+### Feat
+
+- **compare**: plot_milestone_bars — cross-stage A/B chart with verdict palette (#69)
+
 ## v0.25.0 (2026-05-17)
 
 ### Feat
