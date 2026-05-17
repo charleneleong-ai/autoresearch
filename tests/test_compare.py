@@ -17,6 +17,7 @@ from autoresearch.compare import (
     load_milestones_yaml,
     plot_cross_game_scoreboard,
     plot_cross_game_scoreboard_from_index,
+    plot_milestone_bars,
     plot_milestone_progression,
     plot_multi_tag_overlay,
 )
@@ -547,6 +548,162 @@ def test_progression_mutual_exclusion_color_vs_colors(tmp_path: Path) -> None:
             primary_colors=["#fff", "#000"],
             out_path=tmp_path / "x.png",
         )
+
+
+# ── milestone bars ─────────────────────────────────────────────────────
+
+
+def test_milestone_accepts_verdict_and_n_as_optional_fields() -> None:
+    """``Milestone.verdict`` + ``Milestone.n`` are opt-in; they default to None
+    so existing call sites are unaffected. Bars-form plot consumes them."""
+    m_bare = Milestone(label="a", metrics={"score": 5.0})
+    assert m_bare.verdict is None
+    assert m_bare.n is None
+
+    m_full = Milestone(label="b", metrics={"score": 5.0}, verdict="LIFT", n=5)
+    assert m_full.verdict == "LIFT"
+    assert m_full.n == 5
+
+
+def test_load_milestones_yaml_parses_verdict_and_n(tmp_path: Path) -> None:
+    """YAML schema: top-level ``verdict`` + ``n`` per milestone populate the
+    new fields."""
+    yaml_path = tmp_path / "milestones.yaml"
+    yaml_path.write_text(
+        """
+primary_metric: score
+milestones:
+  - label: a
+    verdict: BASELINE
+    n: 3
+    metrics:
+      score: 5.0
+  - label: b
+    metrics:
+      score: 6.0
+"""
+    )
+    milestones, _ = load_milestones_yaml(yaml_path)
+    assert milestones[0].verdict == "BASELINE"
+    assert milestones[0].n == 3
+    assert milestones[1].verdict is None
+    assert milestones[1].n is None
+
+
+def test_plot_milestone_bars_writes_png(tmp_path: Path) -> None:
+    """Smoke: writes a valid PNG file for a minimal milestone list."""
+    out = tmp_path / "bars.png"
+    plot_milestone_bars(
+        [Milestone(label="a", metrics={"score": 5.0}, verdict="FLAT")],
+        primary_metric="score",
+        out_path=out,
+    )
+    assert out.exists()
+    assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_plot_milestone_bars_colors_by_verdict(tmp_path: Path) -> None:
+    """Each bar's facecolor must match the verdict palette so the chart
+    conveys outcome category at a glance (BASELINE grey, FLAT blue,
+    NEUTRAL+ green, REGRESS red, LIFT purple, PENDING light grey)."""
+    palette = {
+        "BASELINE": "#7f8c8d",
+        "REGRESS": "#e74c3c",
+        "LIFT": "#9b59b6",
+    }
+    milestones = [
+        Milestone(label="a", metrics={"score": 5.0}, verdict="BASELINE"),
+        Milestone(label="b", metrics={"score": 3.0}, verdict="REGRESS"),
+        Milestone(label="c", metrics={"score": 8.0}, verdict="LIFT"),
+    ]
+    fig = plot_milestone_bars(
+        milestones,
+        primary_metric="score",
+        palette=palette,
+        out_path=tmp_path / "v.png",
+        return_fig=True,
+    )
+    bars = [c for c in fig.axes[0].containers if hasattr(c, "patches")][0]
+    import matplotlib.colors as mcolors
+
+    actual = [mcolors.to_hex(p.get_facecolor()) for p in bars.patches]
+    expected = [palette[v] for v in ["BASELINE", "REGRESS", "LIFT"]]
+    assert actual == expected
+
+
+def test_plot_milestone_bars_renders_pending_as_hatched_placeholder(tmp_path: Path) -> None:
+    """A PENDING milestone (sweep in flight, score unknown) renders as a
+    hatched translucent bar at the chart-top ceiling — reads as 'TBD' not
+    as a measured 0%."""
+    milestones = [
+        Milestone(label="done", metrics={"score": 5.0}, verdict="FLAT"),
+        Milestone(label="next", metrics={"score": 0.0}, verdict="PENDING"),
+    ]
+    fig = plot_milestone_bars(
+        milestones,
+        primary_metric="score",
+        out_path=tmp_path / "p.png",
+        return_fig=True,
+    )
+    bars = [c for c in fig.axes[0].containers if hasattr(c, "patches")][0]
+    # The PENDING bar should be hatched and the FLAT bar shouldn't.
+    assert bars.patches[0].get_hatch() is None
+    assert bars.patches[1].get_hatch() is not None
+    assert bars.patches[1].get_alpha() and bars.patches[1].get_alpha() < 1.0
+
+
+def test_plot_milestone_bars_renders_threshold_lines(tmp_path: Path) -> None:
+    """``thresholds=[{value, label, color}]`` renders horizontal reference
+    lines — the ceilings the milestones are trying to beat."""
+    fig = plot_milestone_bars(
+        [Milestone(label="a", metrics={"score": 50.0}, verdict="FLAT")],
+        primary_metric="score",
+        thresholds=[{"value": 57.14, "label": "M4 ceiling", "color": "tab:green"}],
+        out_path=tmp_path / "t.png",
+        return_fig=True,
+    )
+    hlines = [ln for ln in fig.axes[0].get_lines() if ln.get_linestyle() == "--"]
+    assert any(abs(ln.get_ydata()[0] - 57.14) < 1e-6 for ln in hlines)
+
+
+def test_score_dot_colors_marks_min_and_max() -> None:
+    """Helper that color-codes per-iter scores: max breach → green,
+    min collapse → red, middle scores → neutral. When all scores are
+    equal (no spread) every dot stays neutral."""
+    from autoresearch.compare import _score_dot_colors
+
+    # Spread → extremes coloured.
+    colors = _score_dot_colors([71.43, 57.14, 28.57, 28.57, 28.57], neutral="#000")
+    assert colors == ["#16a34a", "#000", "#dc2626", "#dc2626", "#dc2626"]
+
+    # All equal → no extremes coloured.
+    flat = _score_dot_colors([57.14, 57.14, 57.14], neutral="#000")
+    assert flat == ["#000", "#000", "#000"]
+
+    # Two values → both are extremes.
+    two = _score_dot_colors([10.0, 20.0], neutral="#000")
+    assert two == ["#dc2626", "#16a34a"]
+
+
+def test_plot_milestone_bars_overlays_error_bars_and_scatter(tmp_path: Path) -> None:
+    """metric_stds renders an error bar; metric_scores renders scatter dots —
+    same machinery as plot_milestone_progression, just on bars."""
+    out = tmp_path / "scatter.png"
+    plot_milestone_bars(
+        [
+            Milestone(
+                label="q",
+                metrics={"score": 42.86},
+                metric_stds={"score": 20.2},
+                metric_scores={"score": [71.43, 57.14, 28.57, 28.57, 28.57]},
+                verdict="REGRESS",
+                n=5,
+            )
+        ],
+        primary_metric="score",
+        out_path=out,
+    )
+    assert out.exists()
 
 
 # ── extract from results.jsonl ────────────────────────────────────────

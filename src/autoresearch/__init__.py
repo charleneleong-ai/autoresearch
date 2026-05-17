@@ -10,6 +10,7 @@ from autoresearch.compare import (
     extract_metrics_from_results_jsonl,
     load_milestones_yaml,
     plot_cross_game_scoreboard,
+    plot_milestone_bars,
     plot_milestone_progression,
     plot_multi_tag_overlay,
 )
@@ -167,6 +168,7 @@ __all__ = [
     "GPUTriageThresholds",
     "plot_multi_tag_overlay",
     "plot_cross_game_scoreboard",
+    "plot_milestone_bars",
     "plot_milestone_progression",
     "Milestone",
     "load_milestones_yaml",

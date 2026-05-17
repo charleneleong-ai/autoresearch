@@ -478,6 +478,12 @@ class Milestone:
     scores as scatter dots on top of the mean — surfaces single-iter
     outliers (e.g. an iter breaching a ceiling once) that a wide σ band
     would otherwise hide.
+
+    ``verdict`` and ``n`` are opt-in fields consumed by the bar-form chart
+    (:func:`plot_milestone_bars`) for cross-stage A/B comparison.
+    ``verdict`` is a free-form tag (typically ``BASELINE`` / ``FLAT`` /
+    ``NEUTRAL+`` / ``REGRESS`` / ``LIFT`` / ``PENDING``) that drives the
+    bar colour; ``n`` is the sample count rendered inside the bar.
     """
 
     label: str
@@ -485,6 +491,8 @@ class Milestone:
     description: str = ""
     metric_stds: dict[str, float] = field(default_factory=dict)
     metric_scores: dict[str, list[float]] = field(default_factory=dict)
+    verdict: str | None = None
+    n: int | None = None
 
 
 def _walk_dot_path(data: Any, path: str) -> float:
@@ -649,6 +657,8 @@ def _milestone_from_raw(m: dict[str, Any]) -> Milestone:
         description=str(m.get("description") or ""),
         metric_stds=metric_stds,
         metric_scores=metric_scores,
+        verdict=str(m["verdict"]) if m.get("verdict") is not None else None,
+        n=int(m["n"]) if m.get("n") is not None else None,
     )
 
 
@@ -752,6 +762,8 @@ def _draw_metric_series(
         # Per-iter scatter overlay where metric_scores is populated. Each
         # raw score plots as a dot at the milestone's x — surfaces single-iter
         # outliers (e.g. one iter breaching a ceiling) that the σ band hides.
+        # Min/max are colour-coded (red/green) so a glance distinguishes
+        # "one iter breached" from "one iter collapsed".
         for x, ms in zip(xs, milestones, strict=False):
             raw = ms.metric_scores.get(key)
             if not raw:
@@ -759,11 +771,11 @@ def _draw_metric_series(
             ax.scatter(
                 [x] * len(raw),
                 raw,
-                color=color,
-                s=20,
+                c=_score_dot_colors(raw, neutral=color),
+                s=70,
                 edgecolor="white",
-                linewidth=0.8,
-                alpha=0.85,
+                linewidth=1.4,
+                alpha=0.95,
                 zorder=4,
             )
         drawn.append((key, color, line))
@@ -971,6 +983,221 @@ def plot_milestone_progression(
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return out_path
+
+
+# ── milestone bars (cross-stage A/B comparison) ────────────────────────
+
+_DOT_MAX_COLOR = "#16a34a"  # green — best iter (often the breach)
+_DOT_MIN_COLOR = "#dc2626"  # red — worst iter (often the collapse)
+
+
+def _score_dot_colors(scores: Sequence[float], *, neutral: str) -> list[str]:
+    """Color-code per-iter dots: max → green, min → red, middle → neutral.
+
+    Returns a per-score colour list aligned with ``scores``. When all
+    values are equal (no spread to highlight), every dot gets ``neutral``.
+    Lets a glance at the chart distinguish *"one iter breached"* from
+    *"one iter collapsed"* without reading the legend.
+    """
+    if not scores:
+        return []
+    lo, hi = min(scores), max(scores)
+    if lo == hi:
+        return [neutral] * len(scores)
+    return [_DOT_MAX_COLOR if v == hi else _DOT_MIN_COLOR if v == lo else neutral for v in scores]
+
+
+VERDICT_PALETTE: dict[str, str] = {
+    "BASELINE": "#7f8c8d",
+    "FLAT": "#3498db",
+    "NEUTRAL+": "#2ecc71",
+    "LIFT": "#9b59b6",
+    "REGRESS": "#e74c3c",
+    "PENDING": "#bdc3c7",
+}
+
+
+def plot_milestone_bars(
+    milestones: Sequence[Milestone],
+    *,
+    primary_metric: str,
+    out_path: str | Path,
+    palette: dict[str, str] | None = None,
+    thresholds: Sequence[dict[str, Any]] | None = None,
+    title: str | None = None,
+    ylabel: str | None = None,
+    pending_value: float | None = None,
+    show_descriptions: bool = True,
+    figsize: tuple[float, float] = (13.0, 7.0),
+    dpi: int = 140,
+    return_fig: bool = False,
+) -> Path | Any:
+    """Cross-stage A/B bar chart over a hand-curated sequence of milestones.
+
+    Use this when the question is *"which intervention won?"* — each
+    milestone is an independent experiment, not a point on a trajectory.
+    Complements :func:`plot_milestone_progression` (twin-axis trajectory
+    view); pick one based on whether the milestones form a sequence
+    (lines) or a comparison (bars).
+
+    Each bar is coloured by ``milestone.verdict`` via ``palette`` (defaults
+    to :data:`VERDICT_PALETTE`). Milestones with ``verdict == "PENDING"``
+    render as a hatched translucent placeholder at ``pending_value`` (or
+    the top threshold) so they read as *"sweep in flight, score TBD"*
+    rather than *"0% measured"*. Inside-bar text shows
+    ``"<verdict>  n=<n>"`` rotated 90°.
+
+    ``metric_stds`` renders an error bar (mean ± std). ``metric_scores``
+    overlays per-iter scatter dots — surfaces single-iter outliers that
+    a wide σ band would hide.
+
+    ``thresholds`` is a list of ``{value, label, color}`` dicts; each
+    renders as a dashed horizontal reference line with a left-edge label.
+
+    ``show_descriptions`` appends a monospace footer enumerating each
+    milestone's ``description`` — useful when the bar labels are short
+    stage codes.
+    """
+    palette = palette if palette is not None else VERDICT_PALETTE
+    thresholds = list(thresholds or [])
+
+    labels = [m.label for m in milestones]
+    means = [m.metrics[primary_metric] for m in milestones]
+    stds = [m.metric_stds.get(primary_metric, 0.0) for m in milestones]
+    verdicts = [m.verdict or "FLAT" for m in milestones]
+    descriptions = [m.description for m in milestones]
+    ns = [m.n for m in milestones]
+    colors = [palette.get(v, "#34495e") for v in verdicts]
+
+    fig, ax = plt.subplots(figsize=figsize)
+    xs = list(range(len(labels)))
+
+    # PENDING rendering: hatched translucent placeholder at the highest
+    # threshold (or pending_value) so the bar reads "TBD" rather than 0%.
+    placeholder_h = (
+        pending_value
+        if pending_value is not None
+        else max((t["value"] for t in thresholds), default=max(means + [0.0]) * 1.1)
+    )
+    plot_means = [
+        placeholder_h if v == "PENDING" else m for v, m in zip(verdicts, means, strict=False)
+    ]
+    plot_stds = [0.0 if v == "PENDING" else s for v, s in zip(verdicts, stds, strict=False)]
+    hatches = ["//" if v == "PENDING" else None for v in verdicts]
+    alphas = [0.45 if v == "PENDING" else 1.0 for v in verdicts]
+
+    bars = ax.bar(
+        xs,
+        plot_means,
+        yerr=plot_stds,
+        capsize=4,
+        color=colors,
+        edgecolor="white",
+        linewidth=1.2,
+    )
+    for b, h, a in zip(bars, hatches, alphas, strict=False):
+        if h:
+            b.set_hatch(h)
+        b.set_alpha(a)
+
+    # Per-iter scatter overlay (same machinery as plot_milestone_progression).
+    # Min/max are colour-coded (red/green) so a glance distinguishes a
+    # breach iter from a collapse iter at the chart level.
+    for x, m in zip(xs, milestones, strict=False):
+        raw = m.metric_scores.get(primary_metric)
+        if not raw:
+            continue
+        ax.scatter(
+            [x] * len(raw),
+            raw,
+            c=_score_dot_colors(raw, neutral="black"),
+            s=85,
+            edgecolor="white",
+            linewidth=1.6,
+            zorder=5,
+        )
+
+    for x, m, s, v, n in zip(xs, means, stds, verdicts, ns, strict=False):
+        top = placeholder_h if v == "PENDING" else m + (s or 0.0)
+        if v == "PENDING":
+            ax.text(x, top + 1.8, "TBD", ha="center", fontsize=10, fontweight="bold", color="#666")
+        else:
+            ax.text(x, top + 1.8, f"{m:.2f}", ha="center", fontsize=10, fontweight="bold")
+        n_label = f"  n={n}" if n is not None else ""
+        ax.text(
+            x,
+            (placeholder_h if v == "PENDING" else m) / 2,
+            f"{v}{n_label}",
+            ha="center",
+            va="center",
+            fontsize=9,
+            color="white" if v != "PENDING" else "#444",
+            fontweight="bold",
+            rotation=90,
+        )
+
+    for t in thresholds:
+        ax.axhline(t["value"], linestyle="--", color=t["color"], linewidth=1.0, alpha=0.7)
+        ax.text(
+            -0.45,
+            t["value"] + 0.6,
+            f"{t['label']} ({t['value']:.2f})",
+            ha="left",
+            fontsize=8,
+            color=t["color"],
+        )
+
+    ax.set_ylim(0, max(placeholder_h + 8, max(plot_means + plot_stds) + 10))
+    ax.set_xlim(-0.6, len(labels) - 0.4)
+    ax.set_ylabel(ylabel or primary_metric, fontsize=10)
+    ax.set_xticks(xs)
+    ax.set_xticklabels(labels, fontsize=9.5, fontweight="bold")
+    if title:
+        ax.set_title(title, fontsize=13, fontweight="bold", pad=14)
+    ax.grid(axis="y", linestyle=":", alpha=0.4)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    ordered_verdicts = ["BASELINE", "FLAT", "NEUTRAL+", "LIFT", "REGRESS", "PENDING"]
+    legend_labels = sorted(
+        {v for v in verdicts},
+        key=lambda v: ordered_verdicts.index(v) if v in ordered_verdicts else 99,
+    )
+    ax.legend(
+        [plt.Rectangle((0, 0), 1, 1, color=palette.get(v, "#34495e")) for v in legend_labels],
+        legend_labels,
+        loc="upper right",
+        fontsize=9,
+        framealpha=0.95,
+        ncol=len(legend_labels),
+        bbox_to_anchor=(1.0, 1.0),
+    )
+
+    if show_descriptions and any(descriptions):
+        footer = "\n".join(
+            f"  {lab:<22s} {desc}" for lab, desc in zip(labels, descriptions, strict=False)
+        )
+        fig.text(
+            0.06,
+            -0.02,
+            "Levers tested:\n" + footer,
+            ha="left",
+            va="top",
+            fontsize=8,
+            color="#444",
+            family="monospace",
+        )
+        fig.tight_layout(rect=[0, 0.18, 1, 1])
+    else:
+        fig.tight_layout()
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    if return_fig:
+        return fig
     plt.close(fig)
     return out_path
 
