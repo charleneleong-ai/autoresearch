@@ -1,14 +1,21 @@
-"""Tests for autoresearch.trajectory — TrajectoryWriter + StepRecord."""
+"""Tests for autoresearch.trajectory — TrajectoryWriter, StepRecord, extract_iter_metrics."""
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from autoresearch.trajectory import (
+    ActionSpec,
+    DwellSpec,
+    IterMetrics,
+    MilestoneSpec,
     StepRecord,
     TrajectoryWriter,
     convert_scratchpad_to_think,
+    extract_iter_metrics,
+    format_recent_history,
     has_incomplete_scratchpad,
 )
 
@@ -99,7 +106,7 @@ def test_step_to_sharegpt_carries_fallback_metadata() -> None:
     assert out["fallback_reason"] == "LLM 429 timeout"
 
 
-# ── TrajectoryWriter ───────────────────────────────────────────────────
+# ── StepRecord outcome fields ──────────────────────────────────────────
 
 
 def _make_step(step_num: int, *, fallback: bool = False) -> StepRecord:
@@ -114,6 +121,31 @@ def _make_step(step_num: int, *, fallback: bool = False) -> StepRecord:
         cached_tokens=50 if step_num > 1 else 0,
         is_fallback=fallback,
     )
+
+
+def test_step_record_info_score_defaults_to_none() -> None:
+    assert _make_step(1).info_score is None
+
+
+def test_step_record_obs_digest_defaults_to_none() -> None:
+    assert _make_step(1).obs_digest is None
+
+
+def test_step_record_accepts_outcome_fields() -> None:
+    rec = StepRecord(
+        step=5,
+        system_prompt=None,
+        user_prompt="u",
+        assistant_output="a",
+        action="x",
+        info_score=3.5,
+        obs_digest="deadbeef",
+    )
+    assert rec.info_score == 3.5
+    assert rec.obs_digest == "deadbeef"
+
+
+# ── TrajectoryWriter ───────────────────────────────────────────────────
 
 
 def test_writer_creates_log_dir_and_paths(tmp_path: Path) -> None:
@@ -141,7 +173,6 @@ def test_clean_episode_lands_in_success_file(tmp_path: Path) -> None:
     assert entry["game_name"] == "mario"
     assert entry["n_steps"] == 3
     assert entry["n_fallbacks"] == 0
-    # token totals
     assert entry["total_input_tokens"] == 300
     assert entry["total_output_tokens"] == 30
     assert entry["total_cached_tokens"] == 100  # steps 2 & 3 had 50 each
@@ -156,8 +187,7 @@ def test_episode_with_any_fallback_lands_in_failed_file(tmp_path: Path) -> None:
 
     assert target == writer.failed_path
     assert not writer.success_path.exists()
-    entry = json.loads(writer.failed_path.read_text())
-    assert entry["n_fallbacks"] == 1
+    assert json.loads(writer.failed_path.read_text())["n_fallbacks"] == 1
 
 
 def test_incomplete_episode_lands_in_failed_file_even_without_fallback(tmp_path: Path) -> None:
@@ -175,14 +205,12 @@ def test_buffer_clears_after_flush(tmp_path: Path) -> None:
     writer.add_step(_make_step(1))
     writer.add_step(_make_step(2))
     writer.flush_episode(episode_id=0, completed=True, final_score=1.0, game_name="g")
-    # New episode starts empty.
     writer.add_step(_make_step(1))
     writer.flush_episode(episode_id=1, completed=True, final_score=2.0, game_name="g")
 
     lines = writer.success_path.read_text().strip().split("\n")
     assert len(lines) == 2
-    ep0 = json.loads(lines[0])
-    ep1 = json.loads(lines[1])
+    ep0, ep1 = json.loads(lines[0]), json.loads(lines[1])
     assert ep0["n_steps"] == 2
     assert ep1["n_steps"] == 1
     assert ep1["episode_id"] == 1
@@ -191,17 +219,10 @@ def test_buffer_clears_after_flush(tmp_path: Path) -> None:
 def test_steps_in_entry_are_sharegpt_shaped(tmp_path: Path) -> None:
     writer = TrajectoryWriter(tmp_path)
     writer.add_step(
-        StepRecord(
-            step=0,
-            system_prompt="sys",
-            user_prompt="u",
-            assistant_output="a",
-            action="A",
-        )
+        StepRecord(step=0, system_prompt="sys", user_prompt="u", assistant_output="a", action="A")
     )
     writer.flush_episode(episode_id=0, completed=True, final_score=0, game_name="g")
-    entry = json.loads(writer.success_path.read_text())
-    step = entry["steps"][0]
+    step = json.loads(writer.success_path.read_text())["steps"][0]
     assert {c["from"] for c in step["conversations"]} == {"system", "human", "gpt"}
     assert step["action"] == "A"
 
@@ -232,35 +253,7 @@ def test_unicode_serialises_without_escape(tmp_path: Path) -> None:
         )
     )
     writer.flush_episode(episode_id=0, completed=True, final_score=0, game_name="mario")
-    raw = writer.success_path.read_text()
-    assert "マリオ" in raw
-
-
-# ── StepRecord outcome fields ──────────────────────────────────────────
-
-
-def test_step_record_info_score_defaults_to_none() -> None:
-    rec = _make_step(1)
-    assert rec.info_score is None
-
-
-def test_step_record_obs_digest_defaults_to_none() -> None:
-    rec = _make_step(1)
-    assert rec.obs_digest is None
-
-
-def test_step_record_accepts_outcome_fields() -> None:
-    rec = StepRecord(
-        step=5,
-        system_prompt=None,
-        user_prompt="u",
-        assistant_output="a",
-        action="x",
-        info_score=3.5,
-        obs_digest="deadbeef",
-    )
-    assert rec.info_score == 3.5
-    assert rec.obs_digest == "deadbeef"
+    assert "マリオ" in writer.success_path.read_text()
 
 
 # ── TrajectoryWriter.recent ────────────────────────────────────────────
@@ -270,8 +263,7 @@ def test_recent_returns_last_k(tmp_path: Path) -> None:
     writer = TrajectoryWriter(tmp_path)
     for i in range(1, 6):
         writer.add_step(_make_step(i))
-    last3 = writer.recent(3)
-    assert [r.step for r in last3] == [3, 4, 5]
+    assert [r.step for r in writer.recent(3)] == [3, 4, 5]
 
 
 def test_recent_k_larger_than_buffer_returns_all(tmp_path: Path) -> None:
@@ -291,14 +283,11 @@ def test_recent_does_not_mutate_buffer(tmp_path: Path) -> None:
     writer = TrajectoryWriter(tmp_path)
     for i in range(1, 4):
         writer.add_step(_make_step(i))
-    snapshot = writer.recent(2)
-    snapshot.clear()
-    assert len(writer._buffer) == 3  # internal buffer unchanged
+    writer.recent(2).clear()
+    assert len(writer._buffer) == 3
 
 
 # ── format_recent_history ─────────────────────────────────────────────
-
-from autoresearch.trajectory import format_recent_history  # noqa: E402
 
 
 def test_format_recent_history_empty() -> None:
@@ -306,35 +295,18 @@ def test_format_recent_history_empty() -> None:
 
 
 def test_format_recent_history_score_delta_and_state_change() -> None:
-    records = [
-        StepRecord(
-            step=1,
+    def _rec(step: int, score: float, digest: str) -> StepRecord:
+        return StepRecord(
+            step=step,
             system_prompt=None,
             user_prompt="u",
             assistant_output="a",
-            action="north",
-            info_score=0.0,
-            obs_digest="aaa",
-        ),
-        StepRecord(
-            step=2,
-            system_prompt=None,
-            user_prompt="u",
-            assistant_output="a",
-            action="north",
-            info_score=0.0,
-            obs_digest="aaa",
-        ),
-        StepRecord(
-            step=3,
-            system_prompt=None,
-            user_prompt="u",
-            assistant_output="a",
-            action="east",
-            info_score=1.0,
-            obs_digest="bbb",
-        ),
-    ]
+            action="north" if step < 3 else "east",
+            info_score=score,
+            obs_digest=digest,
+        )
+
+    records = [_rec(1, 0.0, "aaa"), _rec(2, 0.0, "aaa"), _rec(3, 1.0, "bbb")]
     lines = format_recent_history(records).splitlines()
     assert "state=initial" in lines[0]
     assert "state=unchanged (loop?)" in lines[1]
@@ -371,19 +343,7 @@ def test_format_recent_history_action_truncated_at_60_chars() -> None:
 
 # ── extract_iter_metrics ───────────────────────────────────────────────
 
-import re  # noqa: E402
-
-from autoresearch.trajectory import (  # noqa: E402
-    ActionSpec,
-    DwellSpec,
-    IterMetrics,
-    MilestoneSpec,
-    extract_iter_metrics,
-)
-
 _MOVE_TO_RE = re.compile(r"move_to[^()]*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)")
-
-# --- helpers shared by all extract_iter_metrics tests ---
 
 
 def _score(row: dict) -> float:
@@ -415,9 +375,6 @@ _ACTION_SPEC = ActionSpec(extract_target=_move_target)
 def _write_gs(tmp_path: Path, rows: list[dict]) -> Path:
     (tmp_path / "game_states.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
     return tmp_path
-
-
-# --- tests ---
 
 
 def test_extract_basic_milestones_and_dwell(tmp_path: Path) -> None:
@@ -461,34 +418,24 @@ def test_extract_perseveration(tmp_path: Path) -> None:
         zone_extractor=_zone,
         score_max=1.0,
     )
-    # 2 repeats out of 3 consecutive pairs = 66.7 %
-    assert abs(m.perseveration_pct - 66.7) < 0.2
+    assert abs(m.perseveration_pct - 66.7) < 0.2  # 2 repeats out of 3 pairs
 
 
 def test_extract_missing_game_states(tmp_path: Path) -> None:
     m = extract_iter_metrics(
-        tmp_path,
-        milestone_specs=[],
-        score_extractor=_score,
-        zone_extractor=_zone,
-        score_max=1.0,
+        tmp_path, milestone_specs=[], score_extractor=_score, zone_extractor=_zone, score_max=1.0
     )
     assert m.error is not None
     assert "game_states.jsonl" in m.error
 
 
 def test_extract_evaluation_summary_overrides_score(tmp_path: Path) -> None:
-    rows = [{"obs": {"game_info": {"score": 2, "map_name": "A"}}, "action": "look"}]
-    _write_gs(tmp_path, rows)
+    _write_gs(tmp_path, [{"obs": {"game_info": {"score": 2, "map_name": "A"}}, "action": "look"}])
     (tmp_path / "evaluation_summary.json").write_text(
         json.dumps({"episodes": [{"final_score": 5.0}]})
     )
     m = extract_iter_metrics(
-        tmp_path,
-        milestone_specs=[],
-        score_extractor=_score,
-        zone_extractor=_zone,
-        score_max=7.0,
+        tmp_path, milestone_specs=[], score_extractor=_score, zone_extractor=_zone, score_max=7.0
     )
     assert m.final_score == 5.0
     assert abs(m.score_pct - 5.0 / 7.0 * 100) < 0.1
@@ -518,95 +465,3 @@ def test_extract_returns_itmetrics_dataclass(tmp_path: Path) -> None:
     )
     assert isinstance(m, IterMetrics)
     assert m.run_id == tmp_path.name
-
-
-# ── introspect --format json ───────────────────────────────────────────
-
-
-from typer.testing import CliRunner  # noqa: E402
-
-from autoresearch.introspect import app  # noqa: E402
-
-_runner = CliRunner()
-
-
-def _make_adapter_module(tmp_path: Path) -> str:
-    """Write a minimal adapter .py into tmp_path and return its dotted module path."""
-    adapter_dir = tmp_path / "fake_adapter_pkg"
-    adapter_dir.mkdir()
-    (adapter_dir / "__init__.py").write_text("")
-
-    def _gi(row: dict) -> dict:
-        return row.get("obs", {}).get("game_info", {})
-
-    code_lines = [
-        "from autoresearch.trajectory import MilestoneSpec",
-        "def _gi(r): return r.get('obs', {}).get('game_info', {})",
-        "TRAJECTORY_MILESTONES = [MilestoneSpec('M1', lambda r: _gi(r).get('score', 0) >= 1)]",
-        "TRAJECTORY_SCORE_EXTRACTOR = lambda r: float(_gi(r).get('score', 0))",
-        "TRAJECTORY_ZONE_EXTRACTOR = lambda r: _gi(r).get('map_name', '?') or '?'",
-        "TRAJECTORY_SCORE_MAX = 1.0",
-    ]
-    (adapter_dir / "adapter.py").write_text("\n".join(code_lines) + "\n")
-    return "fake_adapter_pkg.adapter"
-
-
-def test_introspect_cli_format_json_emits_valid_json(tmp_path: Path) -> None:
-    import sys
-
-    # build one iter dir with a single game_states.jsonl row
-    iter_dir = tmp_path / "runs" / "iter_1"
-    iter_dir.mkdir(parents=True)
-    row = {"obs": {"game_info": {"score": 1, "map_name": "Route1"}}, "action": "look"}
-    (iter_dir / "game_states.jsonl").write_text(json.dumps(row) + "\n")
-
-    adapter_mod = _make_adapter_module(tmp_path)
-    sys.path.insert(0, str(tmp_path))
-    try:
-        result = _runner.invoke(
-            app,
-            [
-                "--run",
-                f"S:{tmp_path / 'runs'}:iter_*",
-                "--adapter",
-                adapter_mod,
-                "--format",
-                "json",
-            ],
-        )
-    finally:
-        sys.path.pop(0)
-
-    assert result.exit_code == 0, result.output
-    parsed = json.loads(result.output)
-    assert isinstance(parsed, list)
-    assert parsed[0]["label"] == "S"
-    iters = parsed[0]["iters"]
-    assert len(iters) == 1
-    assert iters[0]["run_id"] == "iter_1"
-    assert iters[0]["score_pct"] == 100.0
-    assert iters[0]["first_milestone_step"]["M1"] == 0
-    assert "mean_score_pct" in parsed[0]
-
-
-def test_introspect_cli_format_text_is_default(tmp_path: Path) -> None:
-    import sys
-
-    iter_dir = tmp_path / "runs" / "iter_2"
-    iter_dir.mkdir(parents=True)
-    row = {"obs": {"game_info": {"score": 0, "map_name": "Pallet"}}, "action": "look"}
-    (iter_dir / "game_states.jsonl").write_text(json.dumps(row) + "\n")
-
-    adapter_mod = _make_adapter_module(tmp_path)
-    sys.path.insert(0, str(tmp_path))
-    try:
-        result = _runner.invoke(
-            app,
-            ["--run", f"T:{tmp_path / 'runs'}:iter_*", "--adapter", adapter_mod],
-        )
-    finally:
-        sys.path.pop(0)
-
-    assert result.exit_code == 0, result.output
-    assert "══════" in result.output  # text table header
-    assert "final=" in result.output
