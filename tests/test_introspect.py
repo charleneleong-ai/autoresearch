@@ -85,3 +85,16 @@ def test_format_text_is_default(adapter) -> None:
     assert result.exit_code == 0, result.output
     assert "══════" in result.output
     assert "final=" in result.output
+
+
+def test_format_text_renders_step_zero_milestones(adapter) -> None:
+    """Milestone reached at step 0 should render as `M1@0`, not `M1@n/a` —
+    the `or 'n/a'` idiom mistakenly treats 0 as missing."""
+    mod, runs = adapter
+    _make_iter_dir(runs, "iter_1", score=1, map_name="Route1")
+
+    result = _runner.invoke(app, ["--run", f"T:{runs}:iter_*", "--adapter", mod])
+
+    assert result.exit_code == 0, result.output
+    assert "M1@0" in result.output
+    assert "M1@n/a" not in result.output
