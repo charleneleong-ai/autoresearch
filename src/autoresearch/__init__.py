@@ -21,6 +21,7 @@ from autoresearch.current_run import (
     sidecar,
     write_sidecar,
 )
+from autoresearch.files import keep_recent, warn_if_tmp_data_dir
 from autoresearch.gpu_monitor import (
     GPUMonitor,
     GPUSample,
@@ -157,6 +158,9 @@ __all__ = [
     "sidecar",
     "wait_with_timeout",
     "write_sidecar",
+    # filesystem helpers
+    "keep_recent",
+    "warn_if_tmp_data_dir",
     # subprocess crash classification (autoresearch#26)
     "CrashPattern",
     "crash_reason_from_stdout",
