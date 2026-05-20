@@ -1,3 +1,9 @@
+## v0.27.0 (2026-05-20)
+
+### Feat
+
+- **files**: keep_recent + warn_if_tmp_data_dir helpers (#72)
+
 ## v0.26.2 (2026-05-17)
 
 ### Refactor
