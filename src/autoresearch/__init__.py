@@ -84,9 +84,12 @@ from autoresearch.subprocess_utils import (
     wait_with_timeout,
 )
 from autoresearch.sweep_runner import (
+    CompositeTriageMonitor,
+    GPUTriageMonitor,
     IterOutcome,
     IterPlan,
     IterPlanner,
+    NullTriageMonitor,
     ResultExtractor,
     SweepResult,
     SweepRunner,
@@ -143,9 +146,12 @@ __all__ = [
     "STATUS_RUNNING",
     "decide_status",
     # sweep runner (autoresearch#20 PR 2)
+    "CompositeTriageMonitor",
+    "GPUTriageMonitor",
     "IterOutcome",
     "IterPlan",
     "IterPlanner",
+    "NullTriageMonitor",
     "ResultExtractor",
     "SweepResult",
     "SweepRunner",

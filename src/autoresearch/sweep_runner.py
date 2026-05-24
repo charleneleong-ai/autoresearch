@@ -32,6 +32,12 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from autoresearch.current_run import sidecar
+from autoresearch.gpu_monitor import (
+    DEFAULT_POLL_INTERVAL_S,
+    GPUTriage,
+    GPUTriageThresholds,
+    _nvidia_smi_sample,
+)
 from autoresearch.results import (
     get_score,
     load_results,
@@ -146,6 +152,140 @@ class TriageMonitor(Protocol):
         ...
 
 
+class NullTriageMonitor:
+    """No-op triage — never kills, never extracts a run_id.
+
+    Default for :class:`SweepRunner` when no triage is needed. Useful for:
+
+    - Single-rollout launches (just want the runner's launch + log + retrospective
+      pipeline without active monitoring).
+    - Workloads where the relevant kill signals are already handled by the
+      subprocess itself (e.g. a wrapper script that respects SIGTERM).
+    - Tests where the triage protocol is irrelevant to the assertion.
+    """
+
+    def setup(
+        self,
+        plan: IterPlan,
+        proc: subprocess.Popen[bytes],
+        baseline: float,
+    ) -> str | None:
+        return None
+
+    def check(self, elapsed_s: float) -> str | None:
+        return None
+
+    def teardown(self) -> None:
+        return None
+
+
+class GPUTriageMonitor:
+    """Built-in triage monitor for GPU hang / wasted-compute / undersized-config.
+
+    Wraps :class:`autoresearch.gpu_monitor.GPUTriage` with the
+    :class:`TriageMonitor` protocol so it drops directly into
+    :class:`SweepRunner`. Polls ``nvidia-smi`` every ``poll_interval_s``
+    inside ``check()`` (only when the runner's outer poll cycle fires —
+    no separate thread).
+
+    Use alone (e.g. for a pure GPU-bound rollout with no project-specific
+    triage) or compose with project-specific monitors via
+    :class:`CompositeTriageMonitor`.
+
+    Result-plateau / KL-spike / loss-curve detection is *not* included —
+    those are sequential-sweep semantics that don't apply to single rollouts
+    or parallel replicates. Project-specific monitors should layer those on
+    top via composition.
+    """
+
+    def __init__(
+        self,
+        thresholds: GPUTriageThresholds | None = None,
+        poll_interval_s: float = DEFAULT_POLL_INTERVAL_S,
+    ) -> None:
+        self.thresholds = thresholds or GPUTriageThresholds()
+        self.poll_interval_s = poll_interval_s
+        self._triage = GPUTriage(self.thresholds)
+        self._last_poll_s: float = -float("inf")
+
+    def setup(
+        self,
+        plan: IterPlan,
+        proc: subprocess.Popen[bytes],
+        baseline: float,
+    ) -> str | None:
+        # Reset latched state so a kill latched in iter N-1 doesn't leak into iter N.
+        self._triage = GPUTriage(self.thresholds)
+        self._last_poll_s = -float("inf")
+        return None
+
+    def check(self, elapsed_s: float) -> str | None:
+        # Throttle: skip nvidia-smi if we sampled too recently.
+        if elapsed_s - self._last_poll_s < self.poll_interval_s:
+            return None
+        self._last_poll_s = elapsed_s
+
+        sample = _nvidia_smi_sample()
+        if sample is None:
+            return None
+        return self._triage.update(sample)
+
+    def teardown(self) -> None:
+        return None
+
+
+class CompositeTriageMonitor:
+    """Combine multiple :class:`TriageMonitor` instances.
+
+    Typical use: GPU-built-in triage + a project-specific reward-plateau /
+    KL-spike monitor.
+
+    ``setup()`` calls every child's setup; the **first non-None run_id**
+    wins (so any child can be the run_id discoverer).
+
+    ``check()`` polls every child in order; the **first non-None kill
+    reason** short-circuits (so the highest-priority detector should be
+    listed first if it matters).
+
+    ``teardown()`` calls every child's teardown even if one raises — the
+    first exception is re-raised at the end.
+    """
+
+    def __init__(self, monitors: list[Any]) -> None:
+        self.monitors = monitors
+
+    def setup(
+        self,
+        plan: IterPlan,
+        proc: subprocess.Popen[bytes],
+        baseline: float,
+    ) -> str | None:
+        run_id: str | None = None
+        for monitor in self.monitors:
+            child_run_id = monitor.setup(plan, proc, baseline)
+            if run_id is None and child_run_id is not None:
+                run_id = child_run_id
+        return run_id
+
+    def check(self, elapsed_s: float) -> str | None:
+        for monitor in self.monitors:
+            reason = monitor.check(elapsed_s)
+            if reason is not None:
+                return reason
+        return None
+
+    def teardown(self) -> None:
+        first_exc: BaseException | None = None
+        for monitor in self.monitors:
+            try:
+                monitor.teardown()
+            except BaseException as e:  # noqa: BLE001
+                if first_exc is None:
+                    first_exc = e
+        if first_exc is not None:
+            raise first_exc
+
+
 class ResultExtractor(Protocol):
     """Turns a finished (or killed) subprocess into result-row dicts
     suitable for ``log_experiment``.
@@ -219,8 +359,8 @@ class SweepRunner:
         *,
         tag: str,
         planner: IterPlanner,
-        triage: TriageMonitor,
         extractor: ResultExtractor,
+        triage: TriageMonitor | None = None,
         retrospective_spec: RetrospectiveSpec | None = None,
         experiments_dir: str | Path = "experiments",
         iter_timeout_min: int = 30,
@@ -231,7 +371,10 @@ class SweepRunner:
     ) -> None:
         self.tag = tag
         self.planner = planner
-        self.triage = triage
+        # Default triage to no-op so callers who don't need active monitoring
+        # (single rollouts, parallel replicate batches) can omit it. Built-in
+        # GPUTriageMonitor / CompositeTriageMonitor cover the common needs.
+        self.triage: TriageMonitor = triage or NullTriageMonitor()
         self.extractor = extractor
         self.retrospective_spec = retrospective_spec
         self.experiments_dir = Path(experiments_dir)
@@ -242,6 +385,54 @@ class SweepRunner:
         self.sigterm_grace_s = sigterm_grace_s
 
     # ── public ────────────────────────────────────────────────────────
+
+    @classmethod
+    def run_one(
+        cls,
+        plan: IterPlan,
+        *,
+        tag: str,
+        extractor: ResultExtractor,
+        triage: TriageMonitor | None = None,
+        retrospective_spec: RetrospectiveSpec | None = None,
+        experiments_dir: str | Path = "experiments",
+        iter_timeout_min: int = 30,
+        triage_poll_s: int = 5,
+        sigint_grace_s: int = 60,
+        sigterm_grace_s: int = 30,
+    ) -> IterOutcome:
+        """Convenience: launch *one* :class:`IterPlan` through the runner.
+
+        Wraps :class:`SweepRunner` with a one-shot internal planner so a
+        single rollout doesn't need the planner boilerplate. Returns the
+        single :class:`IterOutcome` directly (instead of the
+        :class:`SweepResult` wrapper).
+
+        Useful for ad-hoc single-rollout launches that want the runner's
+        launch + sidecar + results.jsonl + retrospective pipeline without
+        constructing a sweep schedule.
+        """
+
+        class _OneShotPlanner:
+            def plan_iters(self, history: list[dict[str, Any]]) -> Iterator[IterPlan]:
+                yield plan
+
+        runner = cls(
+            tag=tag,
+            planner=_OneShotPlanner(),
+            extractor=extractor,
+            triage=triage,
+            retrospective_spec=retrospective_spec,
+            experiments_dir=experiments_dir,
+            iter_timeout_min=iter_timeout_min,
+            triage_poll_s=triage_poll_s,
+            pause_between_iters_s=0,  # one-shot — no follow-on iter
+            sigint_grace_s=sigint_grace_s,
+            sigterm_grace_s=sigterm_grace_s,
+        )
+        result = runner.run()
+        # planner yields exactly one plan; result.outcomes always has length 1
+        return result.outcomes[0]
 
     def run(self) -> SweepResult:
         """Execute the sweep loop.  Returns a :class:`SweepResult`."""
@@ -455,9 +646,12 @@ class SweepRunner:
 
 
 __all__ = [
+    "CompositeTriageMonitor",
+    "GPUTriageMonitor",
     "IterOutcome",
     "IterPlan",
     "IterPlanner",
+    "NullTriageMonitor",
     "ResultExtractor",
     "SweepResult",
     "SweepRunner",
