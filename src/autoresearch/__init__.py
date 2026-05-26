@@ -35,6 +35,15 @@ from autoresearch.normalization import (
     normalize_score,
     register_normalizer,
 )
+from autoresearch.parallel_batch import (
+    BatchResult,
+    CompletionCheck,
+    LaunchFn,
+    OnCompletion,
+    SlotSpec,
+    default_launch,
+    run_parallel_batch,
+)
 from autoresearch.prompt_caching import extract_cache_stats
 from autoresearch.results import (
     KEEP_STATUSES,
@@ -215,6 +224,14 @@ __all__ = [
     "render_annotated_html",
     "summarize_confidence",
     "write_summary_report",
+    # parallel-batch — multi-slot orchestration
+    "BatchResult",
+    "CompletionCheck",
+    "LaunchFn",
+    "OnCompletion",
+    "SlotSpec",
+    "default_launch",
+    "run_parallel_batch",
     # retrospective (autoresearch#16)
     "BUILTIN_DETECTORS",
     "BUILTIN_TRANSFORMS",
