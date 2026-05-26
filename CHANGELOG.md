@@ -1,3 +1,10 @@
+## v0.28.0 (2026-05-26)
+
+### Feat
+
+- **sweep_runner**: triage optional + GPU/Null/Composite builtins + run_one (#74)
+- **parallel_batch**: multi-slot parallel orchestration primitive (#73)
+
 ## v0.27.0 (2026-05-20)
 
 ### Feat
