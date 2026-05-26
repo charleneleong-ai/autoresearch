@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v6
 
       - name: Install package + commitizen + build
         run: uv pip install --system -e '.[dev]' build
