@@ -1,3 +1,9 @@
+## v0.29.0 (2026-05-27)
+
+### Feat
+
+- **janitor**: passive orphan-process triage CLI (#76)
+
 ## v0.28.0 (2026-05-26)
 
 ### Feat
