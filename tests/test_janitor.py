@@ -22,6 +22,7 @@ from autoresearch.janitor import (
 
 _REMOVED = KillRule.REMOVED_WORKTREE_PYTHON
 _GAME = KillRule.ORPHAN_GAME_BINARY
+_WRAPPER = KillRule.ORPHAN_GAME_SERVER_WRAPPER
 _STALE = KillRule.STALE_MULTIPROCESSING_POOL
 
 
@@ -80,6 +81,31 @@ _MP_CMD = "/x/.venv/bin/python -c from multiprocessing.spawn import spawn_main; 
             False,
             [],
             id="pyboy_substring_in_arg",
+        ),
+        # Rule 2b: orphan mcp game-server wrapper. Live worktree + parent died →
+        # `server.py` reparented to PPID=1. Hyphenated game-dir pins `[\w-]+`
+        # — covers both `\w` and `-` in one case.
+        pytest.param(
+            "/x/.venv/bin/python /x/evaluation_utils/mcp_game_servers/pokemon-red/server.py",
+            False,
+            [_WRAPPER],
+            id="mcp_wrapper_hyphenated_game",
+        ),
+        # Precedence: removed-worktree wins over wrapper rule.
+        pytest.param(
+            "/gone/.venv/bin/python /gone/evaluation_utils/mcp_game_servers/pokemon_red/server.py",
+            True,
+            [_REMOVED],
+            id="precedence_removed_worktree_over_wrapper",
+        ),
+        # Path component must contain `mcp_game_servers/<name>/server.py` — a
+        # bare `server.py` elsewhere is not a match (avoids killing unrelated
+        # internal servers reparented for unrelated reasons).
+        pytest.param(
+            "/x/.venv/bin/python /opt/some/other/server.py",
+            False,
+            [],
+            id="bare_server_py_no_match",
         ),
         # Safety: KEEP_ALWAYS short-circuits even when worktree is gone
         pytest.param(
@@ -166,6 +192,18 @@ def test_extra_keep_patterns_protect_custom_infra():
 def test_extra_game_binary_tokens_extend_rule():
     cfg = JanitorConfig(extra_game_binary_tokens=("my_emulator",))
     assert _rules("/some/path/my_emulator --foo", worktree_gone=False, config=cfg) == [_GAME]
+
+
+def test_extra_game_server_wrapper_patterns_extend_rule():
+    # Projects with a non-orak game-server layout can declare their own pattern.
+    cfg = JanitorConfig(
+        extra_game_server_wrapper_patterns=(re.compile(r"\bmy_envs/[\w-]+/runner\.py\b"),)
+    )
+    assert _rules(
+        "/x/.venv/bin/python /x/my_envs/dota/runner.py --port 9000",
+        worktree_gone=False,
+        config=cfg,
+    ) == [_WRAPPER]
 
 
 def test_stale_reason_interpolates_configured_threshold():
