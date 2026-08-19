@@ -1,3 +1,9 @@
+## v0.30.0 (2026-08-19)
+
+### Feat
+
+- add write-side W&B logging to SweepRunner._log_row()
+
 ## v0.29.0 (2026-05-27)
 
 ### Feat
