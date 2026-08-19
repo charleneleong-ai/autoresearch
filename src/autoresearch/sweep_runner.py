@@ -368,6 +368,8 @@ class SweepRunner:
         pause_between_iters_s: int = 15,
         sigint_grace_s: int = 60,
         sigterm_grace_s: int = 30,
+        wandb_project: str | None = None,
+        wandb_entity: str | None = None,
     ) -> None:
         self.tag = tag
         self.planner = planner
@@ -383,6 +385,9 @@ class SweepRunner:
         self.pause_between_iters_s = pause_between_iters_s
         self.sigint_grace_s = sigint_grace_s
         self.sigterm_grace_s = sigterm_grace_s
+        self.wandb_project = wandb_project
+        self.wandb_entity = wandb_entity
+        self._wandb_run = None
 
     # ── public ────────────────────────────────────────────────────────
 
@@ -436,6 +441,7 @@ class SweepRunner:
 
     def run(self) -> SweepResult:
         """Execute the sweep loop.  Returns a :class:`SweepResult`."""
+        self._init_wandb()
         history = load_results(self.experiments_dir, self.tag)
         best_score = max((get_score(r) for r in history), default=0.0)
         outcomes: list[IterOutcome] = []
@@ -478,6 +484,8 @@ class SweepRunner:
                     self.pause_between_iters_s,
                 )
                 time.sleep(self.pause_between_iters_s)
+
+        self._finish_wandb()
 
         return SweepResult(
             tag=self.tag,
@@ -607,6 +615,45 @@ class SweepRunner:
             extra=extra or None,
             **kwargs,
         )
+
+        # Write-side W&B: log the row as summary metrics.
+        if self._wandb_run is not None:
+            all_data = {**kwargs, **extra}
+            log_data = {
+                f"sweep/{k}": v
+                for k, v in all_data.items()
+                if isinstance(v, (int, float, str))
+            }
+            log_data["sweep/iter"] = getattr(plan, "iter_num", 0)
+            self._wandb_run.log(log_data)
+
+    def _init_wandb(self) -> None:
+        """Lazily start a W&B run for sweep-level logging."""
+        if self.wandb_project is None:
+            return
+        try:
+            import wandb
+            self._wandb_run = wandb.init(
+                project=self.wandb_project,
+                entity=self.wandb_entity,
+                name=f"sweep-{self.tag}",
+                tags=[self.tag],
+                config={"tag": self.tag, "experiments_dir": str(self.experiments_dir)},
+            )
+            logger.info("W&B run started: %s", self._wandb_run.url)
+        except Exception as e:
+            logger.warning("Failed to start W&B run: %s", e)
+            self._wandb_run = None
+
+    def _finish_wandb(self) -> None:
+        """Finish the W&B run if one was started."""
+        if self._wandb_run is not None:
+            try:
+                import wandb
+                wandb.finish()
+            except Exception:
+                pass
+            self._wandb_run = None
 
     def _run_retrospective(self, plan: IterPlan, n_rows: int) -> list[Finding]:
         """Run detectors on the just-logged rows.  Returns all findings."""
