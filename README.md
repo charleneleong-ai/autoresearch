@@ -244,7 +244,11 @@ Alpha, personal use. Validated against live multi-month sweeps. Current modules 
 | `wandb_history` | Thin adapter: `fetch_history(run_url, keys, samples)` → `dict[str, list[float]]`. Lazy wandb import behind the `[wandb]` extra; powers `gradient_collapse` and any future detectors that read training-time series |
 | `subprocess_utils` | `kill_gracefully(proc)` (SIGINT → SIGTERM → SIGKILL escalation ladder with grace windows) + `wait_with_timeout(proc, timeout_s, should_kill=...)` (poll-and-kill helper for iter loops). Extracted from duplicated boilerplate in orak / gemma4-rlvr's `experiments/autoresearch.py`. ([#20](https://github.com/charleneleong-ai/autoresearch/issues/20)) |
 | `current_run` | Daemon (`autoresearch-current-run`) that tails sweep logs to maintain `current_run.json` for the chart's RUNNING dot. Also exposes `write_sidecar` / `clear_sidecar` / `sidecar` context manager for in-loop callers that already know the iter state and don't need a separate daemon process. |
-| `gpu_monitor` | GPU util/memory tracker context manager |
+| `gpu_monitor` | GPU util/memory tracker context manager; `GPUSummary.as_metrics()` flattens it for a run summary |
+| `schedule` | `Schedule` yaml (`command`, `common_overrides`, `iters`) → `SchedulePlanner` (tagged, resumable `IterPlan`s) + `ScoreJsonExtractor` (`<tag>_score.json` → row via `decide_status`) |
+| `timing` | `Phases` context-manager timer — minutes per phase, `as_metrics()`, `dominant()` |
+| `tracking` | `Run`: W&B run behind one switch (`WANDB_MODE=disabled` / failed init → no-op), `load_env` drops blank `WANDB_*`/`HF_*` values that would shadow a netrc login |
+| `wandb_report` | `replace_section(url, heading, markdown, panels)` edits one section of an existing W&B report in place; `results_table` builds a linked markdown table (`[wandb]` extra) |
 
 ## Releasing — automatic on merge to main
 

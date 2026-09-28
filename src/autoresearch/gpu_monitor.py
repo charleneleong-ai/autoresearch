@@ -35,7 +35,7 @@ import shutil
 import subprocess
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 # Defaults match the autoresearch orchestrator's triage thresholds (calibrated
@@ -72,6 +72,14 @@ class GPUSummary:
         if self.mem_total_gb <= 0:
             return 0.0
         return self.peak_mem_gb / self.mem_total_gb * 100
+
+    def as_metrics(self, prefix: str = "gpu/") -> dict[str, float]:
+        """Numeric fields flattened for a run summary (hints stay separate: they are text)."""
+        out = {
+            f"{prefix}{k}": float(v) for k, v in asdict(self).items() if isinstance(v, int | float)
+        }
+        out[f"{prefix}peak_mem_pct"] = float(self.peak_mem_pct)
+        return out
 
 
 def _nvidia_smi_sample() -> GPUSample | None:

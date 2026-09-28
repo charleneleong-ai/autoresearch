@@ -35,7 +35,7 @@ pr = ["requests>=2.31"]
 # (and any future detectors that need to read training-time series). Lazy-
 # imported in autoresearch.wandb_history; without the extra, the detector
 # silently no-ops instead of crashing.
-wandb = ["wandb>=0.17"]
+wandb = ["wandb>=0.17", "wandb-workspaces>=0.1", "python-dotenv>=1.0"]
 dev = [
     "pytest>=8",
     "ruff>=0.6",
