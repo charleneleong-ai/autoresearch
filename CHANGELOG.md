@@ -1,3 +1,9 @@
+## v0.31.0 (2026-09-29)
+
+### Feat
+
+- schedule planner, score-json extractor, phase timers, W&B run wrapper and report updater (#78)
+
 ## v0.30.0 (2026-08-19)
 
 ### Feat
