@@ -4,7 +4,9 @@ The minimal contract a project needs to run a sweep:
 
 * ``configs/schedules/<name>.yaml`` with ``command`` (sub-command of the train
   CLI), ``common_overrides`` (flat CLI list) and ``iters`` (``description`` +
-  ``overrides`` each).
+  ``overrides`` each). An iter may set its own ``command`` (e.g. an ensemble step
+  that averages earlier iters); it then runs without ``common_overrides``, which
+  belong to the schedule's command.
 * A train CLI that accepts ``--tag`` and writes ``<results_dir>/<tag>_score.json``
   holding at least the primary score (``score_key``), and optionally ``wandb_url``,
   ``runtime_min`` and any per-term metrics.
@@ -76,11 +78,12 @@ class SchedulePlanner:
             if tag in done:
                 continue
             overrides = [str(x) for x in it.get("overrides", [])]
+            common = self.schedule.common_overrides if "command" not in it else []
             yield IterPlan(
                 cmd=[
                     *self.train_cmd,
-                    self.schedule.command,
-                    *self.schedule.common_overrides,
+                    str(it.get("command", self.schedule.command)),
+                    *common,
                     *overrides,
                     "--tag",
                     tag,
