@@ -2,7 +2,9 @@
 
 Detects PPID=1 processes that no longer have a productive owner:
 - Python procs from worktrees that have been removed
-- Game servers (SC2, pyboy, gym, 2048) whose parent runner is dead
+- Game-binary processes (SC2, pyboy, gym, 2048) whose parent runner is dead
+- MCP game-server python wrappers (`mcp_game_servers/<game>/server.py`)
+  whose parent run.py is dead
 - Stale multiprocessing pool forks > 24h old with no active sweep
 
 Dry-run by default (prints a table). `--apply` kills (SIGTERM, 4s grace, then
@@ -69,6 +71,12 @@ _WORKTREE_PYTHON_RE = re.compile(r"(/[A-Za-z0-9_./-]+?)/\.venv/[^\s]*\bpython")
 DEFAULT_GAME_BINARY_TOKENS = ("SC2_x64", "pyboy", "gym-super-mario-bros", "burnysc2")
 _GAME_BINARY_RE = re.compile(rf"\b(?:{'|'.join(DEFAULT_GAME_BINARY_TOKENS)})\b")
 
+# MCP game-server python wrappers (orak's evaluation_utils framework). When the
+# parent run.py dies, these per-game `server.py` procs reparent to PPID=1 and
+# leak gRPC ports/file handles — distinct from ORPHAN_GAME_BINARY which catches
+# the C++ side (SC2_x64, pyboy). Pattern matches `.../mcp_game_servers/<game>/server.py`.
+_GAME_SERVER_WRAPPER_RE = re.compile(r"\bmcp_game_servers/[\w-]+/server\.py\b")
+
 # Multiprocessing pool forks (resource_tracker + spawn_main).
 _MULTIPROCESSING_RE = re.compile(r"multiprocessing\.(spawn|resource_tracker)")
 
@@ -97,6 +105,7 @@ class JanitorConfig:
 
     extra_keep_patterns: tuple[re.Pattern[str], ...] = ()
     extra_game_binary_tokens: tuple[str, ...] = ()
+    extra_game_server_wrapper_patterns: tuple[re.Pattern[str], ...] = ()
     stale_multiprocessing_age_s: int = STALE_MULTIPROCESSING_AGE_S
     sigterm_wait_s: int = SIGTERM_WAIT_S
 
@@ -107,6 +116,7 @@ DEFAULT_CONFIG = JanitorConfig()
 class KillRule(StrEnum):
     REMOVED_WORKTREE_PYTHON = "removed_worktree_python"
     ORPHAN_GAME_BINARY = "orphan_game_binary"
+    ORPHAN_GAME_SERVER_WRAPPER = "orphan_game_server_wrapper"
     STALE_MULTIPROCESSING_POOL = "stale_multiprocessing_pool"
 
 
@@ -167,10 +177,10 @@ def find_orphans(
     """Identify kill targets. Pure function — no side effects, no `ps` calls.
 
     Rule precedence (first match wins): removed-worktree python →
-    orphan game binary → stale multiprocessing pool.
+    orphan game binary → orphan game-server wrapper → stale multiprocessing pool.
 
     `worktree_exists` lets tests inject a deterministic dir-present check.
-    `config` overrides thresholds + extends KEEP_ALWAYS / game-binary lists.
+    `config` overrides thresholds + extends KEEP_ALWAYS / game-binary / wrapper lists.
     """
     exists = Path.exists if worktree_exists is None else worktree_exists
     keep_patterns = KEEP_ALWAYS_PATTERNS + config.extra_keep_patterns
@@ -181,6 +191,7 @@ def find_orphans(
             rf"\b(?:{'|'.join(DEFAULT_GAME_BINARY_TOKENS + config.extra_game_binary_tokens)})\b"
         )
     )
+    wrapper_patterns = (_GAME_SERVER_WRAPPER_RE, *config.extra_game_server_wrapper_patterns)
     stale_age = config.stale_multiprocessing_age_s
 
     targets: list[KillTarget] = []
@@ -194,6 +205,14 @@ def find_orphans(
         elif game_re.search(p.cmd):
             targets.append(
                 KillTarget(p, KillRule.ORPHAN_GAME_BINARY, "game binary reparented to PPID=1")
+            )
+        elif any(pat.search(p.cmd) for pat in wrapper_patterns):
+            targets.append(
+                KillTarget(
+                    p,
+                    KillRule.ORPHAN_GAME_SERVER_WRAPPER,
+                    "mcp game-server wrapper reparented to PPID=1",
+                )
             )
         elif _MULTIPROCESSING_RE.search(p.cmd) and p.etime_s > stale_age:
             targets.append(
