@@ -1,3 +1,9 @@
+## v0.32.0 (2026-09-29)
+
+### Feat
+
+- **schedule**: per-iter command override for steps like ensembling (#79)
+
 ## v0.31.0 (2026-09-29)
 
 ### Feat
