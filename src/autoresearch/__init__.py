@@ -86,6 +86,7 @@ from autoresearch.retry_utils import (
     jittered_backoff,
     with_retries,
 )
+from autoresearch.schedule import Schedule, SchedulePlanner, ScoreJsonExtractor, tag_of
 from autoresearch.subprocess_utils import (
     CrashPattern,
     crash_reason_from_stdout,
@@ -104,6 +105,7 @@ from autoresearch.sweep_runner import (
     SweepRunner,
     TriageMonitor,
 )
+from autoresearch.timing import Phases
 from autoresearch.token_confidence import (
     ConfidenceSummary,
     bucket_by_failure,
@@ -116,6 +118,7 @@ from autoresearch.token_confidence import (
 from autoresearch.token_confidence import (
     Sample as TokenConfidenceSample,
 )
+from autoresearch.tracking import Run, load_env
 from autoresearch.trajectory import (
     ActionSpec,
     DwellSpec,
@@ -139,6 +142,13 @@ from autoresearch.verdict import (
 
 __all__ = [
     "__version__",
+    "Schedule",
+    "SchedulePlanner",
+    "ScoreJsonExtractor",
+    "tag_of",
+    "Phases",
+    "Run",
+    "load_env",
     "filter_by_game",
     "get_score",
     "load_results",

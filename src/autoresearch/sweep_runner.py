@@ -620,9 +620,7 @@ class SweepRunner:
         if self._wandb_run is not None:
             all_data = {**kwargs, **extra}
             log_data = {
-                f"sweep/{k}": v
-                for k, v in all_data.items()
-                if isinstance(v, (int, float, str))
+                f"sweep/{k}": v for k, v in all_data.items() if isinstance(v, (int, float, str))
             }
             log_data["sweep/iter"] = getattr(plan, "iter_num", 0)
             self._wandb_run.log(log_data)
@@ -633,6 +631,7 @@ class SweepRunner:
             return
         try:
             import wandb
+
             self._wandb_run = wandb.init(
                 project=self.wandb_project,
                 entity=self.wandb_entity,
@@ -650,6 +649,7 @@ class SweepRunner:
         if self._wandb_run is not None:
             try:
                 import wandb
+
                 wandb.finish()
             except Exception:
                 pass
