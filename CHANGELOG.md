@@ -1,3 +1,9 @@
+## v0.33.0 (2026-09-29)
+
+### Feat
+
+- **janitor**: catch orphan mcp game-server python wrappers (#77)
+
 ## v0.32.0 (2026-09-29)
 
 ### Feat
