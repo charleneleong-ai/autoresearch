@@ -60,3 +60,15 @@ def test_extractor_labels_baseline_keep_discard_and_crash(schedule, tmp_path):
     assert (
         ex.extract(IterPlan(cmd=[], description="v9_i07 missing"), None, 0)[0]["status"] == "CRASH"
     )
+
+
+def test_iter_command_runs_without_the_schedule_common_overrides(tmp_path):
+    p = tmp_path / "v9.yaml"
+    p.write_text(
+        "common_overrides: [--epochs, 1]\niters:\n"
+        "  - {description: seed, overrides: [--seed, 1]}\n"
+        "  - {description: avg, command: ensemble, overrides: [--members, 'v9_i00,base']}\n"
+    )
+    plans = list(SchedulePlanner(Schedule.load(p), "mlp", ["proj"], tmp_path).plan_iters([]))
+    assert plans[0].cmd == ["proj", "train", "--epochs", "1", "--seed", "1", "--tag", "v9_i00"]
+    assert plans[1].cmd == ["proj", "ensemble", "--members", "v9_i00,base", "--tag", "v9_i01"]
