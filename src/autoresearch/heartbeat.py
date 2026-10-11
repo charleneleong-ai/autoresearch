@@ -39,6 +39,7 @@ without spawning anything (see tests/test_heartbeat.py).
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -103,15 +104,12 @@ def classify(*, running: bool, log_idle_s: int | None, stall_after_s: int) -> St
 
 
 def process_matches(pattern: str) -> bool:
-    """True if any process command line matches, via pgrep -f.
-
-    The pattern must not match the heartbeat's own command line; callers pass the job's
-    executable or script name, not a fragment of their own invocation.
-    """
+    """True if a process other than this heartbeat (or the shell that launched it) matches, via
+    pgrep -f; the pattern is in the heartbeat's own command line, so it always matches itself."""
     if not shutil.which("pgrep"):
         return False
-    found = subprocess.run(["pgrep", "-f", pattern], capture_output=True, check=False)
-    return found.returncode == 0
+    found = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True, check=False)
+    return bool({int(pid) for pid in found.stdout.split()} - {os.getpid(), os.getppid()})
 
 
 def log_idle_seconds(log: Path | None, now: float) -> int | None:

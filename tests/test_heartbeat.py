@@ -6,6 +6,9 @@ Mirrors test_janitor / test_gpu_monitor (inject data, assert pure behaviour).
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
 from functools import partial
 from pathlib import Path
 
@@ -22,6 +25,7 @@ from autoresearch.heartbeat import (
     clamp_interval,
     classify,
     log_idle_seconds,
+    process_matches,
 )
 
 runner = CliRunner()
@@ -198,3 +202,20 @@ class TestCli:
         )
         assert result.exit_code == 0
         assert "clamped" in result.stdout
+
+
+@pytest.mark.skipif(not shutil.which("pgrep"), reason="needs pgrep")
+def test_process_matches_finds_the_job_but_not_the_heartbeat_itself():
+    token = "heartbeat-self-match-probe"
+    probe = f"from autoresearch.heartbeat import process_matches; print(process_matches({token!r}))"
+    assert (
+        subprocess.run(
+            [sys.executable, "-c", probe, token], capture_output=True, text=True
+        ).stdout.strip()
+        == "False"
+    )
+    job = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", token])
+    try:
+        assert process_matches(token)
+    finally:
+        job.kill()
