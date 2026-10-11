@@ -1,3 +1,9 @@
+## v0.36.0 (2026-10-11)
+
+### Feat
+
+- **timeline**: metric timelines over records that are not sweep rows (#83)
+
 ## v0.35.0 (2026-10-11)
 
 ### Feat
