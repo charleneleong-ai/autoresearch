@@ -238,6 +238,19 @@ three states, and `STALLED` is the one worth having: the process is alive but it
 stopped growing. `--interval` is clamped to 30 minutes so silence for longer than that always
 means the heartbeat itself is gone, rather than something that might be fine.
 
+```bash
+# Launch gate: on a shared host, start the next job only once it fits
+autoresearch-wait --label grid_v3 --gpu-free-gb 24 --ram-free-gb 32 --stable 120 \
+  && python train.py ...
+```
+
+`autoresearch-wait` blocks until free GPU memory and available host RAM (`MemAvailable`) have
+both stayed above what the job needs for `--stable` seconds, then exits 0 (`--timeout` exits 1).
+A chain that starts its next job the moment the last one exits walks into whatever else is
+running: CUDA OOM beside another user's training, or the host OOM killer. It checks in while
+waiting, at most 30 minutes apart, so a queued job never reads like a hang. A resource it cannot
+read (no GPU, no `/proc/meminfo`) counts as short, so a failed probe never waves a job through.
+
 The PR body must contain marker comments `<!-- SWEEP_NARRATIVE_START -->` and `<!-- SWEEP_NARRATIVE_END -->` somewhere in its body — the updater patches the table between them.
 
 ## Status
