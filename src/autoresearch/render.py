@@ -92,8 +92,15 @@ def _draw_axis(
     score_field: str,
     score_label: str,
     title: str,
+    score_fmt: str = "{:.2f}",
+    label_field: str | None = None,
+    y_margin: float | None = None,
 ) -> None:
-    """Draw one experiment timeline onto the given matplotlib axis."""
+    """Draw one experiment timeline onto the given matplotlib axis.
+
+    ``label_field`` names a row field shown in place of ``E<n>`` (e.g. a commit or config name);
+    ``y_margin`` pads the y-axis by that fraction of the score range (``None``: the absolute
+    -2 / +3 suited to reward-scale scores)."""
     if not rows:
         ax.set_title(f"{title} — no results yet", fontsize=11, color="#999")
         ax.set_axis_off()
@@ -139,8 +146,10 @@ def _draw_axis(
         else:
             tag = status.lower()
         runtime = f"{int(r.get('runtime_min', 0))}min" if r.get("runtime_min") else ""
-        head = f"E{r.get('experiment', '?')} · {runtime} · {tag}".strip(" ·").replace("·  ·", "·")
-        bits = [f"{score_field}={score(r):.2f}"]
+        name = r.get(label_field) if label_field else None
+        head = f"{name or 'E' + str(r.get('experiment', '?'))} · {runtime} · {tag}"
+        head = head.strip(" ·").replace("·  ·", "·")
+        bits = [f"{score_field}={score_fmt.format(score(r))}"]
         if isinstance(m.get("final_kl"), (int, float)):
             bits.append(f"kl={m['final_kl']:.2f}")
         if r.get("steps"):
@@ -183,9 +192,12 @@ def _draw_axis(
     ax.set_axisbelow(True)
     ax.set_xticks(range(n))
     ax.set_xlim(-0.5, n - 0.5)
-    ymin = min(score(r) for r in rows) - 2
-    ymax = max(score(r) for r in rows) + 3
-    ax.set_ylim(ymin, ymax)
+    lo, hi = min(score(r) for r in rows), max(score(r) for r in rows)
+    if y_margin is None:
+        ax.set_ylim(lo - 2, hi + 3)
+    else:
+        span = (hi - lo) or abs(hi) or 1.0
+        ax.set_ylim(lo - y_margin * span, hi + 1.5 * y_margin * span)
 
 
 def render(
@@ -197,6 +209,9 @@ def render(
     title: str = "Autoresearch progress",
     score_field: str = "score",
     score_label: str = "Reward (higher is better)",
+    score_fmt: str = "{:.2f}",
+    label_field: str | None = None,
+    y_margin: float | None = None,
 ) -> Path:
     """Render `progress.png` from `<experiments_dir>/<tag>[/<config_name>]/results.jsonl`.
 
@@ -238,6 +253,9 @@ def render(
                 score_field=score_field,
                 score_label=score_label,
                 title=game.replace("_", " ").title(),
+                score_fmt=score_fmt,
+                label_field=label_field,
+                y_margin=y_margin,
             )
         fig.suptitle(full_title, fontsize=15, color="#222", y=0.995)
     else:
@@ -250,6 +268,9 @@ def render(
             score_field=score_field,
             score_label=score_label,
             title=full_title,
+            score_fmt=score_fmt,
+            label_field=label_field,
+            y_margin=y_margin,
         )
 
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -275,6 +296,13 @@ def main(
         help="JSONL field to plot on y-axis (e.g. 'score' or 'evaluation_score')",
     ),
     score_label: str = typer.Option("Reward (higher is better)", "--score-label"),
+    score_fmt: str = typer.Option("{:.2f}", "--score-fmt", help="Format for the score label"),
+    label_field: str | None = typer.Option(
+        None, "--label-field", help="Row field shown instead of E<n>"
+    ),
+    y_margin: float | None = typer.Option(
+        None, "--y-margin", help="Pad the y-axis by this fraction of the score range"
+    ),
 ) -> None:
     out_path = render(
         experiments_dir=experiments_dir,
@@ -284,6 +312,9 @@ def main(
         title=title,
         score_field=score_field,
         score_label=score_label,
+        score_fmt=score_fmt,
+        label_field=label_field,
+        y_margin=y_margin,
     )
     rprint(f"[green]wrote[/green] {out_path}  ([dim]{out_path.stat().st_size // 1024} KB[/dim])")
 
