@@ -212,8 +212,10 @@ def render(
     score_fmt: str = "{:.2f}",
     label_field: str | None = None,
     y_margin: float | None = None,
+    rows: list[dict[str, Any]] | None = None,
 ) -> Path:
-    """Render `progress.png` from `<experiments_dir>/<tag>[/<config_name>]/results.jsonl`.
+    """Render `progress.png` from `<experiments_dir>/<tag>[/<config_name>]/results.jsonl`, or from
+    `rows` given directly (then `out` is required).
 
     Auto-detects multi-game layout: if every row has a `game` field and there
     are multiple distinct games, renders vertically stacked subplots. Otherwise
@@ -221,7 +223,10 @@ def render(
 
     Returns the output path.
     """
-    rows = load_results(experiments_dir, tag, config_name)
+    if rows is None:
+        rows = load_results(experiments_dir, tag, config_name)
+    elif out is None:
+        raise ValueError("render(rows=...) needs an explicit out path")
     if not rows:
         raise SystemExit(
             f"no results to plot at {tag_dir(experiments_dir, tag, config_name)}/results.jsonl"
