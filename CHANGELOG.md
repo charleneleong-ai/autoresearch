@@ -1,3 +1,9 @@
+## v0.37.1 (2026-10-11)
+
+### Fix
+
+- **heartbeat**: never count the heartbeat itself as the job (#85)
+
 ## v0.37.0 (2026-10-11)
 
 ### Feat
