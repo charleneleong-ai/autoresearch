@@ -1,3 +1,9 @@
+## v0.34.0 (2026-10-11)
+
+### Feat
+
+- **wandb-report**: collapsed sections and a verdict table for experiment logs (#81)
+
 ## v0.33.0 (2026-09-29)
 
 ### Feat
