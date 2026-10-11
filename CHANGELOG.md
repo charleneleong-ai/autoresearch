@@ -1,3 +1,9 @@
+## v0.35.0 (2026-10-11)
+
+### Feat
+
+- **render**: score format, row labels and a relative y-margin for small-scale scores (#82)
+
 ## v0.34.0 (2026-10-11)
 
 ### Feat
