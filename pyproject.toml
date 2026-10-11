@@ -58,6 +58,7 @@ autoresearch-compare = "autoresearch.compare:cli"
 autoresearch-retrospective = "autoresearch.retrospective:app"
 autoresearch-parallel-batch = "autoresearch.parallel_batch_cli:app"
 autoresearch-janitor = "autoresearch.janitor:app"
+autoresearch-heartbeat = "autoresearch.heartbeat:app"
 introspect = "autoresearch.introspect:app"
 
 [build-system]

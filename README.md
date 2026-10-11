@@ -207,7 +207,7 @@ autoresearch-compare progression \
   --out milestones.png
 ```
 
-### Daemons (PR refresher + in-flight chart row)
+### Daemons (heartbeat + PR refresher + in-flight chart row)
 
 Both daemons are intended to run detached so they survive SSH or coding-agent session death (verify `PPID=1` after launch):
 
@@ -223,6 +223,20 @@ setsid nohup autoresearch-current-run \
   --tag my_sweep --config gemma \
   </dev/null >>logs/current_run_$(date -u +%Y%m%dT%H%M%SZ).log 2>&1 & disown
 ```
+
+```bash
+# Heartbeat: check in on ANY long-running job, whatever it is, at most 30 min apart
+setsid nohup autoresearch-heartbeat \
+  --label my_sweep --pattern train.py --log logs/train.log \
+  </dev/null >>logs/heartbeat_$(date -u +%Y%m%dT%H%M%SZ).log 2>&1 & disown
+```
+
+The heartbeat exists because a job's own log is not evidence of life. A campaign that printed
+once per trajectory (~35 min) crashed with `CUDA_ERROR_UNKNOWN` and sat dead for four hours
+before anyone noticed, because a crash and slow progress produce identical silence. It reports
+three states, and `STALLED` is the one worth having: the process is alive but its log has
+stopped growing. `--interval` is clamped to 30 minutes so silence for longer than that always
+means the heartbeat itself is gone, rather than something that might be fine.
 
 The PR body must contain marker comments `<!-- SWEEP_NARRATIVE_START -->` and `<!-- SWEEP_NARRATIVE_END -->` somewhere in its body — the updater patches the table between them.
 
@@ -244,6 +258,7 @@ Alpha, personal use. Validated against live multi-month sweeps. Current modules 
 | `wandb_history` | Thin adapter: `fetch_history(run_url, keys, samples)` → `dict[str, list[float]]`. Lazy wandb import behind the `[wandb]` extra; powers `gradient_collapse` and any future detectors that read training-time series |
 | `subprocess_utils` | `kill_gracefully(proc)` (SIGINT → SIGTERM → SIGKILL escalation ladder with grace windows) + `wait_with_timeout(proc, timeout_s, should_kill=...)` (poll-and-kill helper for iter loops). Extracted from duplicated boilerplate in orak / gemma4-rlvr's `experiments/autoresearch.py`. ([#20](https://github.com/charleneleong-ai/autoresearch/issues/20)) |
 | `current_run` | Daemon (`autoresearch-current-run`) that tails sweep logs to maintain `current_run.json` for the chart's RUNNING dot. Also exposes `write_sidecar` / `clear_sidecar` / `sidecar` context manager for in-loop callers that already know the iter state and don't need a separate daemon process. |
+| `heartbeat` | Daemon (`autoresearch-heartbeat`) that checks in on any long-running job at a capped interval — ALIVE / STALLED (alive, log not growing) / DEAD, plus GPU line and an optional `--state-cmd`. Classification is a pure function over injected probes |
 | `gpu_monitor` | GPU util/memory tracker context manager; `GPUSummary.as_metrics()` flattens it for a run summary |
 | `schedule` | `Schedule` yaml (`command`, `common_overrides`, `iters`) → `SchedulePlanner` (tagged, resumable `IterPlan`s) + `ScoreJsonExtractor` (`<tag>_score.json` → row via `decide_status`) |
 | `timing` | `Phases` context-manager timer — minutes per phase, `as_metrics()`, `dominant()` |
