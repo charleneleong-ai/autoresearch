@@ -1,3 +1,9 @@
+## v0.37.0 (2026-10-11)
+
+### Feat
+
+- **heartbeat**: check in on any long-running job at a capped interval (#84)
+
 ## v0.36.0 (2026-10-11)
 
 ### Feat
